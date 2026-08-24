@@ -7,8 +7,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from text_localizer.cache import TranslationCache
 from text_localizer.environment import run_doctor
 from text_localizer.logging_config import configure_logging
+from text_localizer.pipeline import analyze_static_image
+from text_localizer.providers.m2m100 import M2M100TranslationProvider
+from text_localizer.providers.paddleocr import PaddleOcrProvider
+from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.video import extract_representative_frames, inspect_video
 
 
@@ -30,6 +35,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze = subparsers.add_parser("analyze-image", help="Analyze one static image")
     analyze.add_argument("path", type=Path)
+    analyze.add_argument("--output", type=Path)
+    analyze.add_argument("--models-root", type=Path, default=Path("models"))
+    analyze.add_argument(
+        "--cache",
+        type=Path,
+        default=Path("data/work/translations.sqlite3"),
+    )
+
+    setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
+    setup.add_argument("--ocr", action="store_true")
+    setup.add_argument("--translation", action="store_true")
+    setup.add_argument("--models-root", type=Path, default=Path("models"))
     return parser
 
 
@@ -59,13 +76,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "analyze-image":
-            if not args.path.is_file():
-                raise FileNotFoundError(f"Input image does not exist: {args.path}")
-            print(
-                "analyze-image is registered; the M1 provider is not installed yet.",
-                file=sys.stderr,
+            output = args.output or Path("data/output") / args.path.stem
+            ocr_provider = PaddleOcrProvider(args.models_root)
+            translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
+            payload = analyze_static_image(
+                args.path,
+                output,
+                ocr_provider,
+                translation_provider,
+                TranslationCache(args.cache),
             )
-            return 2
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "setup-models":
+            if not args.ocr and not args.translation:
+                raise ValueError("Select --ocr, --translation, or both.")
+            prepared: dict[str, str] = {}
+            if args.ocr:
+                prepared["ocr"] = str(setup_ocr_models(args.models_root))
+            if args.translation:
+                prepared["translation"] = str(setup_translation_model(args.models_root))
+            print(json.dumps(prepared, indent=2))
+            return 0
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

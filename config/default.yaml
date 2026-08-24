@@ -1,0 +1,35 @@
+runtime:
+  python: "3.12"
+  device: cpu
+
+tools:
+  ffmpeg: auto
+  ffprobe: auto
+
+paths:
+  input: data/input
+  work: data/work
+  output: data/output
+  models: models
+
+frames:
+  max_count: 20
+  image_format: png
+  scale_long_edge: 1920
+
+ocr:
+  provider: paddleocr
+  detection_model: PP-OCRv5_mobile_det
+  recognition_model: korean_PP-OCRv5_mobile_rec
+  confidence_threshold: 0.5
+
+translation:
+  provider: m2m100
+  model: facebook/m2m100_418M
+  source_language: ko
+  target_language: ja
+
+rendering:
+  preferred_fonts:
+    - C:/Windows/Fonts/YuGothM.ttc
+    - C:/Windows/Fonts/meiryo.ttc

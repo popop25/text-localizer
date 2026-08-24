@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -33,3 +34,5 @@ class TranslationProvider(Protocol):
     def name(self) -> str: ...
 
     def translate(self, source_text: str) -> str: ...
+
+    def translate_many(self, source_texts: Sequence[str]) -> tuple[str, ...]: ...

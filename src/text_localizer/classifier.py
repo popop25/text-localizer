@@ -22,21 +22,25 @@ def normalize_source_text(text: str) -> str:
 
 
 def classify_text(text: str) -> RegionAction:
+    return classify_text_with_reason(text)[0]
+
+
+def classify_text_with_reason(text: str) -> tuple[RegionAction, str]:
     normalized = normalize_source_text(text)
     if not normalized or _ONLY_PUNCTUATION_RE.fullmatch(normalized):
-        return RegionAction.IGNORE
+        return RegionAction.IGNORE, "empty_or_punctuation"
 
     if _URL_RE.search(normalized):
-        return RegionAction.PRESERVE
+        return RegionAction.PRESERVE, "url"
     if _VERSION_RE.fullmatch(normalized) or _UNIT_RE.fullmatch(normalized):
-        return RegionAction.PRESERVE
+        return RegionAction.PRESERVE, "version_or_unit"
     if _ENGLISH_IDENTIFIER_RE.fullmatch(normalized):
-        return RegionAction.PRESERVE
+        return RegionAction.PRESERVE, "english_identifier"
 
     code_markers = ("{", "}", "=>", "</", "/>", "::", "()", "[]", "import ", "def ", "class ")
     if any(marker in normalized for marker in code_markers):
-        return RegionAction.PRESERVE
+        return RegionAction.PRESERVE, "source_code"
 
     if _HANGUL_RE.search(normalized):
-        return RegionAction.TRANSLATE
-    return RegionAction.PRESERVE
+        return RegionAction.TRANSLATE, "contains_hangul"
+    return RegionAction.PRESERVE, "non_korean_text"

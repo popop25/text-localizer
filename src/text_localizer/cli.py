@@ -9,11 +9,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from text_localizer.cache import TranslationCache
+from text_localizer.domain import NormalizedBox
 from text_localizer.environment import run_doctor
+from text_localizer.glossary import Glossary
 from text_localizer.logging_config import configure_logging
 from text_localizer.pipeline import analyze_static_image
 from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
+from text_localizer.quality import AnalysisOptions
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.video import extract_representative_frames, inspect_video
 
@@ -43,6 +46,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/work/translations.sqlite3"),
     )
+    analyze.add_argument(
+        "--glossary",
+        type=Path,
+        default=Path("config/glossary.ko-ja.yaml"),
+    )
+    analyze.add_argument(
+        "--roi",
+        type=_parse_normalized_box,
+        help="OCR crop as normalized x,y,width,height",
+    )
+    analyze.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+        help="Ignore regions centered inside normalized x,y,width,height (repeatable)",
+    )
+    analyze.add_argument("--min-region-height", type=float, default=0.0)
+    analyze.add_argument("--translation-batch-size", type=int, default=4)
+    analyze.add_argument("--no-group-adjacent", action="store_true")
 
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
@@ -55,6 +78,18 @@ def _configure_utf8_console() -> None:
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
+
+
+def _parse_normalized_box(value: str) -> NormalizedBox:
+    try:
+        parts = [float(part.strip()) for part in value.split(",")]
+        if len(parts) != 4:
+            raise ValueError
+        return NormalizedBox(*parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected normalized x,y,width,height values between 0 and 1."
+        ) from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -87,12 +122,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = args.output or Path("data/output") / args.path.stem
             ocr_provider = PaddleOcrProvider(args.models_root)
             translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
+            options = AnalysisOptions(
+                roi=args.roi,
+                exclude_regions=tuple(args.exclude_roi),
+                min_region_height=args.min_region_height,
+                group_adjacent=not args.no_group_adjacent,
+                translation_batch_size=args.translation_batch_size,
+            )
             payload = analyze_static_image(
                 args.path,
                 output,
                 ocr_provider,
                 translation_provider,
                 TranslationCache(args.cache),
+                glossary=Glossary.from_yaml(args.glossary),
+                options=options,
             )
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0

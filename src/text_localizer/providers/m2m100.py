@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,12 @@ class M2M100TranslationProvider:
         self._torch = torch
 
     def translate(self, source_text: str) -> str:
-        encoded = self._tokenizer(source_text, return_tensors="pt")
+        return self.translate_many((source_text,))[0]
+
+    def translate_many(self, source_texts: Sequence[str]) -> tuple[str, ...]:
+        if not source_texts:
+            return ()
+        encoded = self._tokenizer(list(source_texts), return_tensors="pt", padding=True)
         forced_bos_token_id = self._tokenizer.get_lang_id("ja")
         with self._torch.inference_mode():
             generated = self._model.generate(
@@ -46,4 +52,5 @@ class M2M100TranslationProvider:
                 forced_bos_token_id=forced_bos_token_id,
                 max_new_tokens=256,
             )
-        return str(self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0]).strip()
+        decoded = self._tokenizer.batch_decode(generated, skip_special_tokens=True)
+        return tuple(str(item).strip() for item in decoded)

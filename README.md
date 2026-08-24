@@ -17,7 +17,13 @@ static-frame localization pipeline:
 - OCR, translation, total processing, and peak-process-memory metrics;
 - replaceable provider interfaces and deterministic tests without model downloads.
 
-The source image and original MP4 are never modified. The static pipeline works on an extracted frame; temporal tracking and final video rendering are intentionally outside M1.
+M1.1 hardens static quality with pre-OCR regions of interest, auditable OCR normalization,
+protected glossary terms, conservative same-line grouping, batched translation, and
+automatic review flags. See `docs/m1.1-quality-hardening.md` for the design and measured
+sample results.
+
+The source image and original MP4 are never modified. The static pipeline works on an
+extracted frame; temporal tracking and final video rendering are intentionally outside M1.1.
 
 ## Requirements
 
@@ -69,12 +75,30 @@ text-localizer extract-frames data\input\sample.mp4 --count 20
 text-localizer analyze-image data\work\frames\frame-0001.png --output data\output\frame-0001
 ```
 
+For a screen recording, restrict OCR to the content area and optionally exclude content
+inside that area. Coordinates are normalized `x,y,width,height` values against the full
+image:
+
+```powershell
+text-localizer analyze-image data\work\frames\frame-0001.png `
+  --output data\output\frame-0001 `
+  --roi 0.22,0.16,0.75,0.84 `
+  --exclude-roi 0.22,0.37,0.75,0.15 `
+  --min-region-height 0.015
+```
+
+`--exclude-roi` is repeatable. Translation batches default to four items and can be changed
+with `--translation-batch-size`. Use `--no-group-adjacent` to disable same-line grouping.
+
 `analyze-image` writes:
 
 - `source.<ext>`: an unchanged copy of the input frame;
 - `regions.json`: normalized OCR, classification, translation, cache, and metric data;
 - `preview.png`: Japanese overlay preview using Yu Gothic or Meiryo;
 - `viewer.html`: a self-contained overlay viewer for visual review.
+
+Schema v2 also records raw and normalized source text, normalization edits, grouping and
+classification reasons, glossary-aware cache metadata, and per-region `needs_review` flags.
 
 ## Quality checks
 

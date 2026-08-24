@@ -23,7 +23,8 @@ class PaddleOcrProvider:
                 "'text-localizer setup-models --ocr' explicitly first."
             )
 
-        os.environ.setdefault("PADDLE_OCR_BASE_DIR", str(models_root / "paddleocr"))
+        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+        os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(models_root / "paddleocr"))
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         try:
             paddleocr_module = importlib.import_module("paddleocr")
@@ -36,8 +37,7 @@ class PaddleOcrProvider:
         self._pipeline: Any = paddleocr_class(
             text_detection_model_name="PP-OCRv5_mobile_det",
             text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
-            lang="korean",
-            ocr_version="PP-OCRv5",
+            enable_mkldnn=False,
             device="cpu",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,

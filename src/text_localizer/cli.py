@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -50,7 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configure_utf8_console() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_utf8_console()
     parser = build_parser()
     args = parser.parse_args(argv)
     configure_logging(args.verbose)

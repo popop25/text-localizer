@@ -48,9 +48,7 @@ def write_video_viewer(
       <video id="video" controls preload="metadata"></video>
       <div id="overlays" class="overlay-layer" aria-live="off"></div>
     </div>
-    <p class="notice">
-      Scene boundaries are sampled estimates; precision is limited by the sample interval.
-    </p>
+    <p id="precision" class="notice"></p>
   </main>
   <script>
     const manifest = {manifest_json};
@@ -59,6 +57,7 @@ def write_video_viewer(
     const layer = document.getElementById("overlays");
     const toggle = document.getElementById("toggle");
     const status = document.getElementById("status");
+    const precision = document.getElementById("precision");
     const review = document.getElementById("review");
     let activeTrackId = null;
 
@@ -111,6 +110,9 @@ def write_video_viewer(
     review.textContent = manifest.metrics.needs_review_count
       ? `${{manifest.metrics.needs_review_count}} review flag(s)`
       : "";
+    precision.textContent = `Scene boundary estimate: maximum bracket width ` +
+      `${{manifest.sampling.transition_precision_seconds.toFixed(3)}} seconds.`;
+
     video.src = videoSource;
   </script>
 </body>

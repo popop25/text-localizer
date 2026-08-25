@@ -116,6 +116,8 @@ def test_timeline_analyzes_only_unique_scene_representatives(tmp_path: Path) -> 
     assert manifest["tracks"][0]["regions"][0]["translated_text"] == "確率的勾配降下法"
     assert (output_dir / "tracks.json").is_file()
     assert (output_dir / "viewer.html").is_file()
+    assert (output_dir / "editor.html").is_file()
+    assert "maximum bracket width" in (output_dir / "viewer.html").read_text(encoding="utf-8")
     assert "region.needs_review" in (output_dir / "viewer.html").read_text(encoding="utf-8")
 
 

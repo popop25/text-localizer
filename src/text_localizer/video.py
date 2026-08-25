@@ -139,6 +139,39 @@ def extract_representative_frames(video_path: Path, output_dir: Path, count: int
     return outputs
 
 
+def extract_frame_at_timestamp(
+    video_path: Path,
+    output_path: Path,
+    timestamp_seconds: float,
+) -> tuple[Path, bool]:
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Input video does not exist: {video_path}")
+    if timestamp_seconds < 0.0:
+        raise ValueError("Frame timestamp must not be negative.")
+    if output_path.is_file():
+        return output_path.resolve(), True
+    ffmpeg = resolve_executable("ffmpeg", environment_variable="FFMPEG_BIN")
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg was not found. Run doctor and set FFMPEG_BIN if needed.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{timestamp_seconds:.6f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-y",
+        str(output_path),
+    ]
+    subprocess.run(command, check=True)
+    return output_path.resolve(), False
+
+
 def extract_timestamped_frames(
     video_path: Path,
     output_dir: Path,
@@ -163,6 +196,8 @@ def extract_timestamped_frames(
     if ffmpeg is None:
         raise RuntimeError("FFmpeg was not found. Run doctor and set FFMPEG_BIN if needed.")
     output_dir.mkdir(parents=True, exist_ok=True)
+    for stale_frame in output_dir.glob("frame-*.png"):
+        stale_frame.unlink()
     output_pattern = output_dir / "frame-%06d.png"
     started = perf_counter()
     command = [
@@ -198,6 +233,7 @@ def extract_timestamped_frames(
         "video_path": str(video_path.resolve()),
         "video_size_bytes": video_path.stat().st_size,
         "interval_seconds": interval_seconds,
+        "video_modified_ns": video_path.stat().st_mtime_ns,
         "frame_count": len(frames),
         "frames": [frame.to_dict() for frame in frames],
     }
@@ -223,6 +259,8 @@ def _load_matching_sample_manifest(
         if Path(str(payload["video_path"])).resolve() != video_path.resolve():
             return None
         if int(payload.get("video_size_bytes", -1)) != video_path.stat().st_size:
+            return None
+        if int(payload.get("video_modified_ns", -1)) != video_path.stat().st_mtime_ns:
             return None
         if not math.isclose(float(payload["interval_seconds"]), interval_seconds):
             return None

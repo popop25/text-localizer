@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from text_localizer.domain import NormalizedBox, Point, RegionAction
@@ -35,7 +36,24 @@ def test_ocr_coordinates_are_remapped_from_roi_to_original_image() -> None:
 
     remapped = remap_ocr_output(output, roi)
 
-    assert remapped.regions[0].bbox == NormalizedBox(0.25, 0.35, 0.15, 0.025)
+    box = remapped.regions[0].bbox
+    assert (box.x, box.y, box.width, box.height) == pytest.approx((0.25, 0.35, 0.15, 0.025))
+
+
+def test_roi_remapping_clamps_floating_point_boundary_drift() -> None:
+    full_region = OcrRegion(
+        polygon=(Point(0.0, 0.0), Point(1.0, 0.0), Point(1.0, 1.0), Point(0.0, 1.0)),
+        bbox=NormalizedBox(0.0, 0.0, 1.0, 1.0),
+        source_text="경계",
+        confidence=0.9,
+    )
+    roi = NormalizedBox(0.22, 172 / 1080, 0.75, 908 / 1080)
+
+    remapped = remap_ocr_output(OcrOutput((full_region,), 1.0), roi)
+
+    box = remapped.regions[0].bbox
+    assert box.x + box.width <= 1.0
+    assert box.y + box.height <= 1.0
 
 
 def test_roi_creates_a_cropped_ocr_input_and_removes_it(tmp_path: Path) -> None:

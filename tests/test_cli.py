@@ -9,6 +9,8 @@ def test_required_commands_are_registered() -> None:
         "extract-frames": ["extract-frames", "placeholder"],
         "analyze-image": ["analyze-image", "placeholder"],
         "deduplicate-frames": ["deduplicate-frames", "placeholder"],
+        "index-video": ["index-video", "placeholder"],
+        "localize-video": ["localize-video", "placeholder"],
         "setup-models": ["setup-models", "--ocr"],
     }
     for command, arguments in command_arguments.items():

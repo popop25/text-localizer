@@ -15,6 +15,7 @@ from text_localizer.glossary import Glossary
 from text_localizer.logging_config import configure_logging
 from text_localizer.pipeline import analyze_static_image
 from text_localizer.profile import (
+    LocalizationProfile,
     SceneDetectionOptions,
     load_profile,
     merge_analysis_options,
@@ -24,6 +25,7 @@ from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
+from text_localizer.timeline import index_video_timeline, localize_scene_index
 from text_localizer.video import extract_representative_frames, inspect_video
 
 
@@ -94,6 +96,57 @@ def build_parser() -> argparse.ArgumentParser:
     )
     deduplicate.add_argument("--hash-size", type=int)
     deduplicate.add_argument("--hamming-threshold", type=int)
+
+    index_video = subparsers.add_parser(
+        "index-video",
+        help="Extract timestamped samples and index scene time ranges",
+    )
+    index_video.add_argument("path", type=Path)
+    index_video.add_argument("--profile", type=Path)
+    index_video.add_argument("--work-dir", type=Path)
+    index_video.add_argument("--sample-interval", type=float, default=1.0)
+    index_video.add_argument("--roi", type=_parse_normalized_box)
+    index_video.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+    )
+    index_video.add_argument("--hash-size", type=int)
+    index_video.add_argument("--hamming-threshold", type=int)
+
+    localize_video = subparsers.add_parser(
+        "localize-video",
+        help="Analyze unique video scenes and emit synchronized overlay tracks",
+    )
+    localize_video.add_argument("path", type=Path)
+    localize_video.add_argument("--profile", type=Path)
+    localize_video.add_argument("--work-dir", type=Path)
+    localize_video.add_argument("--output", type=Path)
+    localize_video.add_argument("--sample-interval", type=float, default=1.0)
+    localize_video.add_argument("--models-root", type=Path, default=Path("models"))
+    localize_video.add_argument(
+        "--cache",
+        type=Path,
+        default=Path("data/work/translations.sqlite3"),
+    )
+    localize_video.add_argument("--glossary", type=Path)
+    localize_video.add_argument("--roi", type=_parse_normalized_box)
+    localize_video.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+    )
+    localize_video.add_argument("--min-region-height", type=float)
+    localize_video.add_argument("--translation-batch-size", type=int)
+    localize_video.add_argument(
+        "--group-adjacent",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    localize_video.add_argument("--hash-size", type=int)
+    localize_video.add_argument("--hamming-threshold", type=int)
 
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
@@ -204,6 +257,50 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
+        if args.command in {"index-video", "localize-video"}:
+            profile = load_profile(args.profile) if args.profile is not None else None
+            analysis_options = merge_analysis_options(
+                profile,
+                roi=args.roi,
+                exclude_regions=tuple(args.exclude_roi),
+                min_region_height=(
+                    args.min_region_height if args.command == "localize-video" else None
+                ),
+                group_adjacent=(args.group_adjacent if args.command == "localize-video" else None),
+                translation_batch_size=(
+                    args.translation_batch_size if args.command == "localize-video" else None
+                ),
+            )
+            scene_options = _merge_scene_options(profile, args)
+            work_dir = args.work_dir or Path("data/work") / f"{args.path.stem}-timeline"
+            scene_index = index_video_timeline(
+                args.path,
+                work_dir,
+                interval_seconds=args.sample_interval,
+                profile_name=profile.name if profile is not None else None,
+                roi=analysis_options.roi,
+                exclude_regions=analysis_options.exclude_regions,
+                scene_options=scene_options,
+            )
+            if args.command == "index-video":
+                print(json.dumps(scene_index, ensure_ascii=False, indent=2))
+                return 0
+
+            output = args.output or Path("data/output") / f"{args.path.stem}-timeline"
+            ocr_provider = PaddleOcrProvider(args.models_root)
+            translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
+            manifest = localize_scene_index(
+                scene_index,
+                output,
+                ocr_provider,
+                translation_provider,
+                TranslationCache(args.cache),
+                glossary=Glossary.from_yaml(resolve_glossary_path(profile, args.glossary)),
+                analysis_options=analysis_options,
+            )
+            print(json.dumps(manifest, ensure_ascii=False, indent=2))
+            return 0
+
         if args.command == "setup-models":
             if not args.ocr and not args.translation:
                 raise ValueError("Select --ocr, --translation, or both.")
@@ -220,6 +317,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+def _merge_scene_options(
+    profile: LocalizationProfile | None,
+    args: argparse.Namespace,
+) -> SceneDetectionOptions:
+    base = profile.scene_detection if profile is not None else SceneDetectionOptions()
+    return SceneDetectionOptions(
+        hash_size=args.hash_size if args.hash_size is not None else base.hash_size,
+        hamming_threshold=(
+            args.hamming_threshold if args.hamming_threshold is not None else base.hamming_threshold
+        ),
+    )
 
 
 if __name__ == "__main__":

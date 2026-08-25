@@ -92,12 +92,7 @@ def remap_ocr_output(output: OcrOutput, roi: NormalizedBox | None) -> OcrOutput:
     regions = tuple(
         OcrRegion(
             polygon=tuple(_remap_point(point, roi) for point in region.polygon),
-            bbox=NormalizedBox(
-                x=roi.x + region.bbox.x * roi.width,
-                y=roi.y + region.bbox.y * roi.height,
-                width=region.bbox.width * roi.width,
-                height=region.bbox.height * roi.height,
-            ),
+            bbox=_remap_box(region.bbox, roi),
             source_text=region.source_text,
             confidence=region.confidence,
         )
@@ -168,7 +163,23 @@ def box_to_dict(box: NormalizedBox | None) -> dict[str, float] | None:
 
 
 def _remap_point(point: Point, roi: NormalizedBox) -> Point:
-    return Point(x=roi.x + point.x * roi.width, y=roi.y + point.y * roi.height)
+    return Point(
+        x=min(1.0, max(0.0, roi.x + point.x * roi.width)),
+        y=min(1.0, max(0.0, roi.y + point.y * roi.height)),
+    )
+
+
+def _remap_box(box: NormalizedBox, roi: NormalizedBox) -> NormalizedBox:
+    left = min(1.0, max(0.0, roi.x + box.x * roi.width))
+    top = min(1.0, max(0.0, roi.y + box.y * roi.height))
+    right = min(1.0, max(left, roi.x + (box.x + box.width) * roi.width))
+    bottom = min(1.0, max(top, roi.y + (box.y + box.height) * roi.height))
+    return NormalizedBox(
+        x=left,
+        y=top,
+        width=max(right - left, 1e-9),
+        height=max(bottom - top, 1e-9),
+    )
 
 
 def _filter_reason(box: NormalizedBox, options: AnalysisOptions) -> str | None:

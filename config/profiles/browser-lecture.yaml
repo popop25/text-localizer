@@ -1,0 +1,26 @@
+schema_version: 1
+name: browser-lecture-content
+glossary: ../glossary.ko-ja.yaml
+
+analysis:
+  roi:
+    x: 0.22
+    y: 0.16
+    width: 0.75
+    height: 0.84
+  exclude_regions:
+    - x: 0.22
+      y: 0.37
+      width: 0.75
+      height: 0.15
+    - x: 0.84
+      y: 0.78
+      width: 0.13
+      height: 0.22
+  min_region_height: 0.015
+  group_adjacent: true
+  translation_batch_size: 4
+
+scene_detection:
+  hash_size: 16
+  hamming_threshold: 18

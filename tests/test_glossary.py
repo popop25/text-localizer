@@ -110,3 +110,20 @@ def test_unprotected_hangul_still_requires_full_sentence_translation() -> None:
     )
 
     assert prepared.requires_model_translation is True
+
+
+def test_course_glossary_resolves_recurring_langchain_label_variants() -> None:
+    glossary = Glossary.from_yaml(Path(__file__).parents[1] / "config" / "glossary.ko-ja.yaml")
+    sources = (
+        "√ 주로쓰이는LangChain의핵심 요소이해",
+        "√ 주로쓰이는LangChain의핵심요소이해",
+        "√주로쓰이는LangChain의핵심 요소 이해",
+    )
+
+    for source in sources:
+        prepared = glossary.prepare(source)
+        restored, flags = glossary.restore(prepared.protected_text, prepared)
+
+        assert prepared.requires_model_translation is False
+        assert restored == "✓ LangChainで主に使われる主要要素を理解する"
+        assert flags == ()

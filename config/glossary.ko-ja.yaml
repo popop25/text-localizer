@@ -23,6 +23,17 @@ entries:
     target: LangChain
     aliases:
       - LanaChain
+  - source: "√ 주로 쓰이는 LangChain 의 핵심 요소 이해"
+    target: "✓ LangChainで主に使われる主要要素を理解する"
+    aliases:
+      - "√ 주로쓰이는 LangChain 의핵심 요소이해"
+      - "√ 주로쓰이는 LangChain 의핵심요소이해"
+      - "√주로쓰이는 LangChain 의핵심 요소 이해"
+      - "√주로 쓰이는 LangChain 의 핵심 요소 이해"
+      - "√ 주로 쓰이는 LangChain 의 핵심 요소이해"
+      - "√ 주로쓰이는LangChain의핵심 요소이해"
+      - "√ 주로쓰이는LangChain의핵심요소이해"
+      - "√주로쓰이는LangChain의핵심 요소 이해"
   - source: LangGraph
     target: LangGraph
   - source: Ecosystem

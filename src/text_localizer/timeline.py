@@ -143,6 +143,8 @@ def build_track_manifest(
     total_scene_processing_latency_ms = 0.0
     needs_review_count = 0
     translation_reused_count = 0
+    translation_fallback_attempted_count = 0
+    translation_fallback_accepted_count = 0
 
     for raw_scene in scene_index["scenes"]:
         scene_id = int(raw_scene["scene_id"])
@@ -155,6 +157,12 @@ def build_track_manifest(
         total_scene_processing_latency_ms += float(metrics.get("total_processing_latency_ms", 0.0))
         needs_review_count += int(metrics.get("needs_review_count", 0))
         translation_reused_count += int(metrics.get("translation_reused_count", 0))
+        translation_fallback_attempted_count += int(
+            metrics.get("translation_fallback_attempted_count", 0)
+        )
+        translation_fallback_accepted_count += int(
+            metrics.get("translation_fallback_accepted_count", 0)
+        )
         tracks.append(
             {
                 "track_id": f"scene-{scene_id:04d}",
@@ -185,6 +193,8 @@ def build_track_manifest(
             "analysis_relocalized_count": analysis_relocalized_count,
             "translation_reused_count": translation_reused_count,
             "total_ocr_latency_ms": total_ocr_latency_ms,
+            "translation_fallback_attempted_count": translation_fallback_attempted_count,
+            "translation_fallback_accepted_count": translation_fallback_accepted_count,
             "total_translation_latency_ms": total_translation_latency_ms,
             "total_scene_processing_latency_ms": total_scene_processing_latency_ms,
             "current_run_latency_ms": current_run_latency_ms,

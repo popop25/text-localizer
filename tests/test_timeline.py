@@ -347,8 +347,10 @@ def test_timeline_relocalizes_stored_ocr_after_glossary_change(
     )
 
     assert original["metrics"]["needs_review_count"] == 1
+    assert original["metrics"]["translation_fallback_attempted_count"] == 1
+    assert original["metrics"]["translation_fallback_accepted_count"] == 0
     assert ocr.calls == 1
-    assert translator.calls == 1
+    assert translator.calls == 2
     assert relocalized["metrics"]["analysis_relocalized_count"] == 1
     assert relocalized["metrics"]["total_ocr_latency_ms"] == 0.0
     assert relocalized["metrics"]["needs_review_count"] == 0

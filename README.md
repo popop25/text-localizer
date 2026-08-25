@@ -25,8 +25,13 @@ sample results.
 M1.2 adds reusable YAML localization profiles and ROI-aware frame scene deduplication before
 OCR. See `docs/m1.2-scene-dedup-profiles.md` for the scene-index schema and measurements.
 
-The source image and original MP4 are never modified. The static pipeline works on an
-extracted frame; temporal tracking and final video rendering are intentionally outside M1.1.
+M1.3 adds fixed-interval timestamped sampling, scene time ranges, representative-only
+OCR/translation, resumable per-scene analysis, `tracks.json`, and a browser video player with
+synchronized Japanese overlays. See `docs/m1.3-timestamped-tracks.md` for the track schema and
+full-video measurements.
+
+The source image and original MP4 are never modified. M1.3 produces editable temporal overlay
+data and a review player; final video rendering remains outside the current milestone.
 
 ## Requirements
 
@@ -77,6 +82,8 @@ text-localizer inspect-video data\input\sample.mp4
 text-localizer extract-frames data\input\sample.mp4 --count 20
 text-localizer analyze-image data\work\frames\frame-0001.png --output data\output\frame-0001
 text-localizer deduplicate-frames data\work\frames --output data\work\scene-index.json
+text-localizer index-video data\input\sample.mp4 --sample-interval 1
+text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 ```
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
@@ -108,6 +115,26 @@ text-localizer deduplicate-frames data\work\frames `
 Scene indexing hashes only the ROI, masks configured exclusions, keeps every source frame,
 and writes auditable representative and distance decisions. It does not load OCR or
 translation models.
+
+Timestamp and localize a complete video in two inspectable phases:
+
+```powershell
+text-localizer index-video data\input\sample.mp4 `
+  --profile config\profiles\browser-lecture.yaml `
+  --work-dir data\work\sample-timeline `
+  --sample-interval 1
+
+text-localizer localize-video data\input\sample.mp4 `
+  --profile config\profiles\browser-lecture.yaml `
+  --work-dir data\work\sample-timeline `
+  --output data\output\sample-timeline `
+  --sample-interval 1
+```
+
+`index-video` loads neither OCR nor translation. `localize-video` reuses the timestamped
+samples, analyzes only scene representatives, and resumes from matching per-scene
+`regions.json` files. It writes `tracks.json` plus `viewer.html`; the viewer references the
+unchanged source MP4 and suppresses regions carrying automatic review flags.
 
 `analyze-image` writes:
 

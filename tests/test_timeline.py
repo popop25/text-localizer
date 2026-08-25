@@ -197,6 +197,52 @@ def test_timeline_resume_reuses_existing_scene_analyses(tmp_path: Path) -> None:
     assert changed_options["metrics"]["analysis_reused_count"] == 0
 
 
+def test_timeline_resume_reanalyzes_changed_representative_content(
+    tmp_path: Path,
+) -> None:
+    frame_path = tmp_path / "frame-000000.png"
+    Image.new("RGB", (100, 100), "white").save(frame_path)
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"test-video-placeholder")
+    scene_index = index_timestamped_frame_scenes(
+        (TimestampedFrame(0, 0.0, str(frame_path)),),
+        VideoInfo(str(video_path), 100, 100, 30.0, 1.0, "h264"),
+        interval_seconds=1.0,
+        profile_name=None,
+        roi=None,
+        exclude_regions=(),
+        scene_options=SceneDetectionOptions(hash_size=8, hamming_threshold=0),
+    )
+    ocr = CountingOcrProvider()
+    translator = CountingTranslationProvider()
+    output_dir = tmp_path / "output"
+    cache = TranslationCache(tmp_path / "translations.sqlite3")
+
+    localize_scene_index(
+        scene_index,
+        output_dir,
+        ocr,
+        translator,
+        cache,
+        glossary=Glossary.empty(),
+        analysis_options=AnalysisOptions(),
+    )
+    Image.new("RGB", (100, 100), "black").save(frame_path)
+    refreshed = localize_scene_index(
+        scene_index,
+        output_dir,
+        ocr,
+        translator,
+        cache,
+        glossary=Glossary.empty(),
+        analysis_options=AnalysisOptions(),
+    )
+
+    assert ocr.calls == 2
+    assert refreshed["metrics"]["analysis_reused_count"] == 0
+    assert refreshed["metrics"]["analysis_relocalized_count"] == 0
+
+
 class BracketOcrProvider:
     name = "bracket-ocr"
 

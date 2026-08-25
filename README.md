@@ -49,6 +49,11 @@ M2.1 replaces unreadable single-line shrinking with resolution-scaled minimum te
 horizontal expansion, mixed Japanese/English wrapping, collision-aware placement, and layout
 metrics. See `docs/m2.1-readable-overlays.md` for the policy and full-video validation.
 
+M2.2 makes fixed-interval samples exact and auditable with an explicit FFmpeg rounding
+policy, strict schema-v2 resume checks, and representative-image fingerprints that prevent
+stale OCR reuse. It also restores command-level `render-tracks` execution. See
+`docs/m2.2-exact-timestamp-sampling.md` for the diagnosis and full-video validation.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -363,6 +364,8 @@ def _load_matching_analysis(
             return None
         if Path(str(payload["input_image"])).resolve() != representative.resolve():
             return None
+        if not _analysis_source_matches(regions_path, representative):
+            return None
         if payload.get("ocr_provider") != ocr_provider_name:
             return None
         if payload.get("translation_provider") != translation_provider_name:
@@ -396,6 +399,8 @@ def _load_relocalizable_analysis(
             return None
         if Path(str(payload["input_image"])).resolve() != representative.resolve():
             return None
+        if not _analysis_source_matches(regions_path, representative):
+            return None
         if payload.get("ocr_provider") != ocr_provider_name:
             return None
         if not _analysis_options_match(payload.get("analysis_options"), analysis_options):
@@ -419,6 +424,21 @@ def _analysis_options_match(raw: Any, expected: AnalysisOptions) -> bool:
     if raw.get("translation_batch_size") != expected.translation_batch_size:
         return False
     return _boxes_close(raw.get("roi"), box_to_dict(expected.roi))
+
+
+def _analysis_source_matches(regions_path: Path, representative: Path) -> bool:
+    suffix = representative.suffix.lower() or ".png"
+    source_copy = regions_path.parent / f"source{suffix}"
+    if not source_copy.is_file():
+        return False
+    if source_copy.stat().st_size != representative.stat().st_size:
+        return False
+    return _file_sha256(source_copy) == _file_sha256(representative)
+
+
+def _file_sha256(path: Path) -> bytes:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").digest()
 
 
 def _boxes_close(raw: Any, expected: dict[str, float] | None) -> bool:

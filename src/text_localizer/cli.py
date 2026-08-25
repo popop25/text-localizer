@@ -282,20 +282,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "render-tracks":
             manifest = load_track_manifest(args.path)
-        if args.command == "render-video":
-            output = args.output or args.path.with_name("localized.mp4")
-            report = render_localized_video(
-                args.path,
-                output,
-                video_path=args.video,
-                options=VideoRenderOptions(
-                    crf=args.crf,
-                    preset=args.preset,
-                    overwrite=args.overwrite,
-                ),
-            )
-            print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0
 
             video_path = args.video or Path(str(manifest["video"]["path"]))
             output = args.output or args.path.parent
@@ -310,6 +296,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+
+        if args.command == "render-video":
+            output = args.output or args.path.with_name("localized.mp4")
+            report = render_localized_video(
+                args.path,
+                output,
+                video_path=args.video,
+                options=VideoRenderOptions(
+                    crf=args.crf,
+                    preset=args.preset,
+                    overwrite=args.overwrite,
+                ),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
             return 0
 
         if args.command in {"index-video", "localize-video"}:

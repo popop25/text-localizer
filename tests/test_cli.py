@@ -1,3 +1,9 @@
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+import text_localizer.cli as cli
 from text_localizer.cli import build_parser
 
 
@@ -18,3 +24,29 @@ def test_required_commands_are_registered() -> None:
     for command, arguments in command_arguments.items():
         namespace = parser.parse_args(arguments)
         assert namespace.command == command
+
+
+def test_render_tracks_command_writes_viewer_and_editor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest: dict[str, Any] = {"video": {"path": "source.mp4"}}
+    writes: list[tuple[Path, Path, dict[str, Any]]] = []
+    monkeypatch.setattr(cli, "load_track_manifest", lambda _path: manifest)
+    monkeypatch.setattr(
+        cli,
+        "write_video_viewer",
+        lambda path, video, payload: writes.append((path, video, payload)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "write_track_editor",
+        lambda path, video, payload: writes.append((path, video, payload)),
+    )
+
+    status = cli.main(["render-tracks", "tracks.json", "--output", str(tmp_path)])
+
+    assert status == 0
+    assert [item[0].name for item in writes] == ["viewer.html", "editor.html"]
+    assert all(item[1] == Path("source.mp4") for item in writes)
+    assert all(item[2] is manifest for item in writes)

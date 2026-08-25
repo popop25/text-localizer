@@ -78,4 +78,7 @@ translations can become small when constrained to a short Korean OCR box. Burned
 cannot be toggled after rendering. M2 translates on-screen text only; it does not translate,
 dub, or synthesize narration, and configured excluded regions remain unchanged.
 
+M2.1 supersedes the 10-pixel single-line fallback with a readable spatial layout while keeping
+the same source-safety and media-validation guarantees. See `m2.1-readable-overlays.md`.
+
 All generated media and audit artifacts remain ignored by Git.

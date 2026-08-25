@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -74,11 +75,12 @@ def render_localized_video(
     _validate_source_against_manifest(input_info, manifest)
     font_path = find_japanese_font()
     font_family = _font_family(font_path)
-    ass_document, overlay_region_count = build_ass_document(
+    ass_document, layout_metrics = _build_ass_document(
         manifest,
         font_path=font_path,
         font_family=font_family,
     )
+    overlay_region_count = layout_metrics.overlay_region_count
     if overlay_region_count == 0:
         raise ValueError("Track manifest contains no approved translated regions to render.")
 
@@ -166,7 +168,7 @@ def render_localized_video(
 
         latency_ms = (perf_counter() - started) * 1000.0
         report: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "track_manifest": str(track_manifest_path.resolve()),
             "input_video": input_info.to_dict(),
             "input_size_bytes": source_fingerprint[0],
@@ -192,6 +194,7 @@ def render_localized_video(
             "overlay_region_count": overlay_region_count,
             "ass_dialogue_count": overlay_region_count * 2,
             "review_count": 0,
+            "overlay_layout": layout_metrics.to_dict(),
             "render_latency_ms": latency_ms,
             "source_unchanged": True,
             "artifacts": {
@@ -212,12 +215,79 @@ def render_localized_video(
     return report
 
 
+_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+&-]*|[ \t]+|.", re.DOTALL)
+_PROHIBITED_LINE_START = frozenset("、。，．…!?！？)]}」』】》〉")
+
+
+@dataclass(frozen=True, slots=True)
+class OverlayLayoutMetrics:
+    overlay_region_count: int
+    multiline_region_count: int
+    expanded_region_count: int
+    repositioned_region_count: int
+    minimum_font_size: int
+    maximum_font_size: int
+
+    def to_dict(self) -> dict[str, int | str]:
+        return {
+            "mode": "readable-spatial-v1",
+            "multiline_region_count": self.multiline_region_count,
+            "expanded_region_count": self.expanded_region_count,
+            "repositioned_region_count": self.repositioned_region_count,
+            "minimum_font_size": self.minimum_font_size,
+            "maximum_font_size": self.maximum_font_size,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _RegionLayout:
+    original_left: int
+    original_top: int
+    original_right: int
+    original_bottom: int
+    left: int
+    top: int
+    right: int
+    bottom: int
+    lines: tuple[str, ...]
+    font_size: int
+
+    @property
+    def line_count(self) -> int:
+        return len(self.lines)
+
+    @property
+    def is_expanded(self) -> bool:
+        return (
+            self.right - self.left > self.original_right - self.original_left
+            or self.bottom - self.top > self.original_bottom - self.original_top
+        )
+
+    @property
+    def is_repositioned(self) -> bool:
+        return self.left != self.original_left or self.top != self.original_top
+
+
 def build_ass_document(
     manifest: dict[str, Any],
     *,
     font_path: Path,
     font_family: str,
 ) -> tuple[str, int]:
+    document, metrics = _build_ass_document(
+        manifest,
+        font_path=font_path,
+        font_family=font_family,
+    )
+    return document, metrics.overlay_region_count
+
+
+def _build_ass_document(
+    manifest: dict[str, Any],
+    *,
+    font_path: Path,
+    font_family: str,
+) -> tuple[str, OverlayLayoutMetrics]:
     video = manifest["video"]
     width = int(video["width"])
     height = int(video["height"])
@@ -229,6 +299,7 @@ def build_ass_document(
         "ScaledBorderAndShadow: yes",
         "WrapStyle: 2",
         "YCbCr Matrix: TV.709",
+        "; LayoutMode: readable-spatial-v1",
         "",
         "[V4+ Styles]",
         (
@@ -250,11 +321,12 @@ def build_ass_document(
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     events: list[str] = []
-    overlay_region_count = 0
+    all_layouts: list[_RegionLayout] = []
 
     for track in manifest["tracks"]:
         start = _format_ass_time(float(track["start_seconds"]))
         end = _format_ass_time(float(track["end_seconds"]))
+        track_layouts: list[_RegionLayout] = []
         for region in track["regions"]:
             translated_text = region.get("translated_text")
             if (
@@ -264,53 +336,292 @@ def build_ass_document(
                 or bool(region.get("needs_review"))
             ):
                 continue
-
-            bbox = region["bbox"]
-            left = round(float(bbox["x"]) * width)
-            top = round(float(bbox["y"]) * height)
-            right = round((float(bbox["x"]) + float(bbox["width"])) * width)
-            bottom = round((float(bbox["y"]) + float(bbox["height"])) * height)
-            box_width = max(1, right - left)
-            box_height = max(1, bottom - top)
-            font_size = _fit_font_size(
-                translated_text,
-                font_path,
-                max(1, box_width - 8),
-                max(1, box_height - 4),
+            track_layouts.append(
+                _layout_region(
+                    translated_text.strip(),
+                    region["bbox"],
+                    font_path=font_path,
+                    frame_width=width,
+                    frame_height=height,
+                )
             )
-            escaped_text = _escape_ass_text(translated_text)
+
+        resolved_layouts = _resolve_layout_collisions(track_layouts, frame_height=height)
+        all_layouts.extend(resolved_layouts)
+        for layout in resolved_layouts:
+            background_left = min(layout.original_left, layout.left)
+            background_top = min(layout.original_top, layout.top)
+            background_right = max(layout.original_right, layout.right)
+            background_bottom = max(layout.original_bottom, layout.bottom)
+            background_width = max(1, background_right - background_left)
+            background_height = max(1, background_bottom - background_top)
+            escaped_text = _escape_ass_text("\n".join(layout.lines))
             background_tags = (
-                rf"{{\an7\pos({left},{top})\p1\bord0\shad0"
+                rf"{{\an7\pos({background_left},{background_top})\p1\bord0\shad0"
                 rf"\1c&H121212&\1a&H08&}}"
             )
             background = (
-                f"{background_tags}m 0 0 l {box_width} 0 "
-                f"l {box_width} {box_height} l 0 {box_height}"
+                f"{background_tags}m 0 0 l {background_width} 0 "
+                f"l {background_width} {background_height} l 0 {background_height}"
             )
             text_tags = (
-                rf"{{\an7\pos({left + 4},{top + 2})\fs{font_size}"
-                rf"\clip({left},{top},{right},{bottom})\bord0\shad0\q2}}"
+                rf"{{\an7\pos({layout.left + 4},{layout.top + 2})\fs{layout.font_size}"
+                rf"\clip({background_left},{background_top},{background_right},"
+                rf"{background_bottom})\bord0\shad0\q2}}"
             )
             events.append(f"Dialogue: 0,{start},{end},Box,,0,0,0,,{background}")
             events.append(f"Dialogue: 1,{start},{end},Text,,0,0,0,,{text_tags}{escaped_text}")
-            overlay_region_count += 1
 
-    return "\n".join([*header, *events, ""]), overlay_region_count
+    font_sizes = [layout.font_size for layout in all_layouts]
+    metrics = OverlayLayoutMetrics(
+        overlay_region_count=len(all_layouts),
+        multiline_region_count=sum(layout.line_count > 1 for layout in all_layouts),
+        expanded_region_count=sum(layout.is_expanded for layout in all_layouts),
+        repositioned_region_count=sum(layout.is_repositioned for layout in all_layouts),
+        minimum_font_size=min(font_sizes, default=0),
+        maximum_font_size=max(font_sizes, default=0),
+    )
+    return "\n".join([*header, *events, ""]), metrics
 
 
-def _fit_font_size(
+def _layout_region(
     text: str,
+    bbox: dict[str, Any],
+    *,
     font_path: Path,
-    box_width: int,
-    box_height: int,
-) -> int:
-    start_size = max(10, min(72, int(box_height * 0.9)))
-    for size in range(start_size, 9, -1):
-        font = ImageFont.truetype(str(font_path), size=size)
-        left, top, right, bottom = font.getbbox(text)
-        if right - left <= box_width and bottom - top <= box_height:
-            return size
-    return 10
+    frame_width: int,
+    frame_height: int,
+) -> _RegionLayout:
+    original_left = max(0, round(float(bbox["x"]) * frame_width))
+    original_top = max(0, round(float(bbox["y"]) * frame_height))
+    original_right = min(
+        frame_width,
+        round((float(bbox["x"]) + float(bbox["width"])) * frame_width),
+    )
+    original_bottom = min(
+        frame_height,
+        round((float(bbox["y"]) + float(bbox["height"])) * frame_height),
+    )
+    original_width = max(1, original_right - original_left)
+    original_height = max(1, original_bottom - original_top)
+    padding_x = max(4, round(frame_width / 480))
+    padding_y = max(2, round(frame_height / 540))
+    minimum_font_size = max(12, round(16 * frame_height / 1080))
+    preferred_font_size = max(
+        minimum_font_size,
+        min(72, round(original_height * 0.9)),
+    )
+    expanded_width = max(
+        original_width,
+        min(
+            frame_width - original_left,
+            round(frame_width * 0.45),
+            round(original_width * 1.5),
+        ),
+    )
+    candidate_widths = [original_width]
+    if expanded_width >= original_width + padding_x * 2:
+        candidate_widths.append(expanded_width)
+
+    selected_lines: tuple[str, ...] | None = None
+    selected_font_size = minimum_font_size
+    selected_width = original_width
+    normalized_single_line = text.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in normalized_single_line:
+        for candidate_width in candidate_widths:
+            for font_size in range(preferred_font_size, minimum_font_size - 1, -1):
+                font = ImageFont.truetype(str(font_path), size=font_size)
+                if _text_width(font, text) <= max(
+                    1,
+                    candidate_width - padding_x * 2,
+                ):
+                    selected_lines = (text,)
+                    selected_font_size = font_size
+                    selected_width = candidate_width
+                    break
+            if selected_lines is not None:
+                break
+
+    if selected_lines is None:
+        for candidate_width in candidate_widths:
+            for font_size in range(preferred_font_size, minimum_font_size - 1, -1):
+                font = ImageFont.truetype(str(font_path), size=font_size)
+                lines = _wrap_text(
+                    text,
+                    font,
+                    max_width=max(1, candidate_width - padding_x * 2),
+                    max_lines=3,
+                )
+                if lines is not None:
+                    selected_lines = lines
+                    selected_font_size = font_size
+                    selected_width = candidate_width
+                    break
+            if selected_lines is not None:
+                break
+
+    if selected_lines is None:
+        selected_width = expanded_width
+        selected_font_size = minimum_font_size
+        font = ImageFont.truetype(str(font_path), size=selected_font_size)
+        selected_lines = _wrap_text(
+            text,
+            font,
+            max_width=max(1, selected_width - padding_x * 2),
+            max_lines=None,
+        )
+        if selected_lines is None:
+            raise RuntimeError("Unable to lay out translated overlay text.")
+
+    line_height = max(selected_font_size + 2, math.ceil(selected_font_size * 1.2))
+    required_height = original_height
+    if len(selected_lines) > 1:
+        required_height = max(
+            original_height,
+            padding_y * 2 + line_height * len(selected_lines),
+        )
+    layout_top = original_top
+    if layout_top + required_height > frame_height:
+        layout_top = max(0, frame_height - required_height)
+
+    return _RegionLayout(
+        original_left=original_left,
+        original_top=original_top,
+        original_right=original_right,
+        original_bottom=original_bottom,
+        left=original_left,
+        top=layout_top,
+        right=min(frame_width, original_left + selected_width),
+        bottom=min(frame_height, layout_top + required_height),
+        lines=selected_lines,
+        font_size=selected_font_size,
+    )
+
+
+def _wrap_text(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    *,
+    max_width: int,
+    max_lines: int | None,
+) -> tuple[str, ...] | None:
+    lines: list[str] = []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for paragraph in normalized.split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        lines.extend(_wrap_paragraph(paragraph.strip(), font, max_width=max_width))
+    if max_lines is not None and len(lines) > max_lines:
+        return None
+    return tuple(lines)
+
+
+def _wrap_paragraph(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    *,
+    max_width: int,
+) -> list[str]:
+    lines: list[str] = []
+    current = ""
+    pending_space = False
+    for token in _TOKEN_PATTERN.findall(text):
+        if token.isspace():
+            pending_space = bool(current)
+            continue
+
+        separator = " " if pending_space and current else ""
+        candidate = f"{current}{separator}{token}"
+        if not current or _text_width(font, candidate) <= max_width:
+            if not current and _text_width(font, token) > max_width:
+                chunks = _split_overlong_token(token, font, max_width=max_width)
+                lines.extend(chunks[:-1])
+                current = chunks[-1]
+            else:
+                current = candidate
+            pending_space = False
+            continue
+
+        if token in _PROHIBITED_LINE_START:
+            current += token
+            pending_space = False
+            continue
+
+        lines.append(current.rstrip())
+        pending_space = False
+        if _text_width(font, token) <= max_width:
+            current = token
+        else:
+            chunks = _split_overlong_token(token, font, max_width=max_width)
+            lines.extend(chunks[:-1])
+            current = chunks[-1]
+
+    if current:
+        lines.append(current.rstrip())
+    return lines or [""]
+
+
+def _split_overlong_token(
+    token: str,
+    font: ImageFont.FreeTypeFont,
+    *,
+    max_width: int,
+) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for character in token:
+        candidate = f"{current}{character}"
+        if current and _text_width(font, candidate) > max_width:
+            chunks.append(current)
+            current = character
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or [token]
+
+
+def _text_width(font: ImageFont.FreeTypeFont, text: str) -> float:
+    return float(font.getlength(text))
+
+
+def _resolve_layout_collisions(
+    layouts: list[_RegionLayout],
+    *,
+    frame_height: int,
+) -> list[_RegionLayout]:
+    resolved: list[_RegionLayout] = []
+    for layout in sorted(layouts, key=lambda item: (item.original_top, item.original_left)):
+        active = layout
+        for _ in range(len(resolved) + 1):
+            collisions = [
+                previous
+                for previous in resolved
+                if _horizontally_overlaps(active, previous)
+                and _vertically_overlaps(active, previous)
+            ]
+            if not collisions:
+                break
+            height = active.bottom - active.top
+            candidate_top = max(previous.bottom for previous in collisions) + 2
+            if candidate_top + height > frame_height:
+                break
+            active = replace(
+                active,
+                top=candidate_top,
+                bottom=candidate_top + height,
+            )
+        resolved.append(active)
+    return resolved
+
+
+def _horizontally_overlaps(first: _RegionLayout, second: _RegionLayout) -> bool:
+    return min(first.right, second.right) - max(first.left, second.left) > 2
+
+
+def _vertically_overlaps(first: _RegionLayout, second: _RegionLayout) -> bool:
+    return min(first.bottom, second.bottom) - max(first.top, second.top) > 0
 
 
 def _format_ass_time(seconds: float) -> str:

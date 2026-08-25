@@ -45,6 +45,10 @@ M2 renders a zero-review timeline through ASS/libass into a separate H.264 MP4, 
 original audio streams without re-encoding, validates the finished media, and writes an audit
 report. See `docs/m2-final-mp4-rendering.md` for safeguards and full-video results.
 
+M2.1 replaces unreadable single-line shrinking with resolution-scaled minimum text, bounded
+horizontal expansion, mixed Japanese/English wrapping, collision-aware placement, and layout
+metrics. See `docs/m2.1-readable-overlays.md` for the policy and full-video validation.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -173,6 +177,10 @@ text-localizer render-video data\output\sample-timeline\tracks.edited.json `
 source against the track manifest, renders H.264/yuv420p video with libx264, and stream-copies
 audio. It writes the MP4, the generated ASS timeline, and a `.render.json` audit report.
 Existing output artifacts require an explicit `--overwrite`.
+The default `readable-spatial-v1` layout keeps text at least 16 pixels high on 1080p video,
+uses bounded expansion and multi-line wrapping only when needed, and records layout metrics in
+the schema-v2 audit report.
+
 
 `analyze-image` writes:
 

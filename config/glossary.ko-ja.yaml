@@ -1,4 +1,87 @@
 entries:
+  - source: Azure OpenAI
+    target: Azure OpenAI
+    aliases:
+      - Azure OpenA
+      - Azure OpenAl
+  - source: OpenAI API
+    target: OpenAI API
+    aliases:
+      - OpenAl API
+      - OpenAl AP
+      - OpenAl APl
+      - OpenAI APl
+      - OpenAlAPI
+      - OpenAlAP
+      - OpenAIAPI
+      - OpenAI AP
+  - source: OpenAI
+    target: OpenAI
+    aliases:
+      - OpenAl
+  - source: LangChain
+    target: LangChain
+    aliases:
+      - LanaChain
+  - source: LangGraph
+    target: LangGraph
+  - source: Ecosystem
+    target: Ecosystem
+    aliases:
+      - Eco-system
+      - Eco-svstem
+  - source: Multi-Agent
+    target: Multi-Agent
+  - source: Agent
+    target: Agent
+  - source: Introduction
+    target: Introduction
+  - source: Learning Objectives
+    target: Learning Objectives
+  - source: Course Curriculum
+    target: Course Curriculum
+  - source: 강의 개요
+    target: 講義概要
+  - source: 학습 목표
+    target: 学習目標
+  - source: 커리큘럼
+    target: カリキュラム
+  - source: 강의 목록
+    target: 講義一覧
+  - source: 강의소개
+    target: 講義紹介
+    aliases:
+      - 강의 소개
+  - source: 교안 보기
+    target: 教材を見る
+  - source: 교안
+    target: 教材
+  - source: 실습
+    target: 演習
+  - source: 과제
+    target: 課題
+  - source: 기초
+    target: 基礎
+  - source: 개발 방법 학습
+    target: 開発方法の学習
+    aliases:
+      - 개발방법 학습
+  - source: 기업용 서비스 개발 시 고려할 점 이해
+    target: 企業向けサービス開発時の考慮事項を理解する
+    aliases:
+      - 기업용서비스개발시고려할점이해
+  - source: 전사/그룹 대상 AI 서비스 개발 리딩
+    target: 全社・グループ向けAIサービス開発をリード
+    aliases:
+      - 전사/그룹대상AI서비스개발리딩
+  - source: OpenAI API 둘러보기
+    target: OpenAI APIを見てみる
+    aliases:
+      - OpenAI API둘러보기
+      - OpenAIAPI둘러보기
+      - OpenAlAPI둘러보기
+  - source: 개요
+    target: 概要
   - source: 인공지능
     target: 人工知能
   - source: 머신러닝

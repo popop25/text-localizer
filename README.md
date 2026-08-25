@@ -30,8 +30,13 @@ OCR/translation, resumable per-scene analysis, `tracks.json`, and a browser vide
 synchronized Japanese overlays. See `docs/m1.3-timestamped-tracks.md` for the track schema and
 full-video measurements.
 
-The source image and original MP4 are never modified. M1.3 produces editable temporal overlay
-data and a review player; final video rendering remains outside the current milestone.
+M1.4 adds no-OCR scene-boundary bisection, a local browser track editor, edited-track
+validation, and viewer regeneration. See `docs/m1.4-refined-boundaries-editor.md` for the
+workflow and full-video measurements.
+
+
+The source image and original MP4 are never modified. M1.4 produces editable temporal overlay
+data, a review player, and an offline editor; final video rendering remains outside this scope.
 
 ## Requirements
 
@@ -84,6 +89,7 @@ text-localizer analyze-image data\work\frames\frame-0001.png --output data\outpu
 text-localizer deduplicate-frames data\work\frames --output data\work\scene-index.json
 text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
+text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 ```
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
@@ -122,19 +128,24 @@ Timestamp and localize a complete video in two inspectable phases:
 text-localizer index-video data\input\sample.mp4 `
   --profile config\profiles\browser-lecture.yaml `
   --work-dir data\work\sample-timeline `
-  --sample-interval 1
+  --sample-interval 1 `
+  --boundary-refinement-iterations 3
 
 text-localizer localize-video data\input\sample.mp4 `
   --profile config\profiles\browser-lecture.yaml `
   --work-dir data\work\sample-timeline `
   --output data\output\sample-timeline `
-  --sample-interval 1
+  --sample-interval 1 `
+  --boundary-refinement-iterations 3
 ```
 
-`index-video` loads neither OCR nor translation. `localize-video` reuses the timestamped
-samples, analyzes only scene representatives, and resumes from matching per-scene
-`regions.json` files. It writes `tracks.json` plus `viewer.html`; the viewer references the
-unchanged source MP4 and suppresses regions carrying automatic review flags.
+`index-video` loads neither OCR nor translation. Boundary refinement hashes midpoint frames
+inside detected transition brackets and does not add OCR calls. `localize-video` reuses the
+timestamped samples, analyzes only scene representatives, and resumes from matching per-scene
+`regions.json` files. It writes `tracks.json`, `viewer.html`, and `editor.html`; the viewer
+references the unchanged source MP4 and suppresses regions carrying automatic review flags.
+After editing and exporting JSON in the browser, use `render-tracks` to validate the complete
+timeline and regenerate both HTML artifacts.
 
 `analyze-image` writes:
 

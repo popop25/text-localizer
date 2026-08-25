@@ -26,7 +26,9 @@ from text_localizer.providers.paddleocr import PaddleOcrProvider
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.timeline import index_video_timeline, localize_scene_index
+from text_localizer.track_editor import load_track_manifest, write_track_editor
 from text_localizer.video import extract_representative_frames, inspect_video
+from text_localizer.video_viewer import write_video_viewer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -114,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_video.add_argument("--hash-size", type=int)
     index_video.add_argument("--hamming-threshold", type=int)
+    index_video.add_argument("--boundary-refinement-iterations", type=int, default=0)
 
     localize_video = subparsers.add_parser(
         "localize-video",
@@ -147,6 +150,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     localize_video.add_argument("--hash-size", type=int)
     localize_video.add_argument("--hamming-threshold", type=int)
+    localize_video.add_argument("--boundary-refinement-iterations", type=int, default=0)
+
+    render_tracks = subparsers.add_parser(
+        "render-tracks",
+        help="Validate edited tracks and regenerate the viewer and editor",
+    )
+    render_tracks.add_argument("path", type=Path)
+    render_tracks.add_argument("--output", type=Path)
+    render_tracks.add_argument("--video", type=Path)
 
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
@@ -257,6 +269,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
+        if args.command == "render-tracks":
+            manifest = load_track_manifest(args.path)
+            video_path = args.video or Path(str(manifest["video"]["path"]))
+            output = args.output or args.path.parent
+            write_video_viewer(output / "viewer.html", video_path, manifest)
+            write_track_editor(output / "editor.html", video_path, manifest)
+            print(
+                json.dumps(
+                    {
+                        "viewer": str((output / "viewer.html").resolve()),
+                        "editor": str((output / "editor.html").resolve()),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+
         if args.command in {"index-video", "localize-video"}:
             profile = load_profile(args.profile) if args.profile is not None else None
             analysis_options = merge_analysis_options(
@@ -281,6 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 roi=analysis_options.roi,
                 exclude_regions=analysis_options.exclude_regions,
                 scene_options=scene_options,
+                boundary_refinement_iterations=args.boundary_refinement_iterations,
             )
             if args.command == "index-video":
                 print(json.dumps(scene_index, ensure_ascii=False, indent=2))

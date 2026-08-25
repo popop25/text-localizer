@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 
+from text_localizer.boundaries import refine_video_scene_boundaries
 from text_localizer.cache import TranslationCache
 from text_localizer.domain import NormalizedBox
 from text_localizer.glossary import Glossary
@@ -14,6 +15,7 @@ from text_localizer.profile import SceneDetectionOptions
 from text_localizer.providers.base import OcrProvider, TranslationProvider
 from text_localizer.quality import AnalysisOptions, box_to_dict
 from text_localizer.scenes import index_frame_scenes
+from text_localizer.track_editor import write_track_editor
 from text_localizer.video import (
     TimestampedFrame,
     VideoInfo,
@@ -34,6 +36,7 @@ def index_video_timeline(
     roi: NormalizedBox | None,
     exclude_regions: tuple[NormalizedBox, ...],
     scene_options: SceneDetectionOptions,
+    boundary_refinement_iterations: int = 0,
 ) -> dict[str, Any]:
     """Extract timestamped samples and turn consecutive hashes into scene ranges."""
 
@@ -56,6 +59,12 @@ def index_video_timeline(
         extraction_latency_ms=extraction_latency_ms,
         reused_samples=reused_samples,
     )
+    if boundary_refinement_iterations:
+        payload = refine_video_scene_boundaries(
+            payload,
+            work_dir / "refined-boundaries",
+            iterations=boundary_refinement_iterations,
+        )
     payload["metrics"]["total_indexing_latency_ms"] = (perf_counter() - started) * 1000.0
     work_dir.mkdir(parents=True, exist_ok=True)
     _write_json(work_dir / "scene-index.json", payload)
@@ -82,7 +91,7 @@ def index_timestamped_frame_scenes(
         options=scene_options,
     )
     frame_records = _timestamped_scene_records(frames, scene_index["frames"])
-    return {
+    manifest = {
         "schema_version": 1,
         "video": video_info.to_dict(),
         "profile_name": profile_name,
@@ -111,6 +120,7 @@ def index_timestamped_frame_scenes(
             "total_indexing_latency_ms": scene_index["processing_latency_ms"],
         },
     }
+    return manifest
 
 
 def build_track_manifest(
@@ -151,7 +161,7 @@ def build_track_manifest(
             }
         )
 
-    return {
+    manifest = {
         "schema_version": 1,
         "video": scene_index["video"],
         "profile_name": scene_index.get("profile_name"),
@@ -171,6 +181,9 @@ def build_track_manifest(
             "needs_review_count": needs_review_count,
         },
     }
+    if "boundary_refinement" in scene_index:
+        manifest["boundary_refinement"] = scene_index["boundary_refinement"]
+    return manifest
 
 
 def localize_scene_index(
@@ -238,6 +251,7 @@ def localize_scene_index(
     _write_json(output_dir / "tracks.json", manifest)
     video_path = Path(str(scene_index["video"]["path"]))
     write_video_viewer(output_dir / "viewer.html", video_path, manifest)
+    write_track_editor(output_dir / "editor.html", video_path, manifest)
     return manifest
 
 

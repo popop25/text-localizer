@@ -11,6 +11,7 @@ def test_required_commands_are_registered() -> None:
         "deduplicate-frames": ["deduplicate-frames", "placeholder"],
         "index-video": ["index-video", "placeholder"],
         "localize-video": ["localize-video", "placeholder"],
+        "render-tracks": ["render-tracks", "placeholder"],
         "setup-models": ["setup-models", "--ocr"],
     }
     for command, arguments in command_arguments.items():

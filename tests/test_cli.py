@@ -13,6 +13,7 @@ def test_required_commands_are_registered() -> None:
         "localize-video": ["localize-video", "placeholder"],
         "render-tracks": ["render-tracks", "placeholder"],
         "setup-models": ["setup-models", "--ocr"],
+        "render-video": ["render-video", "placeholder"],
     }
     for command, arguments in command_arguments.items():
         namespace = parser.parse_args(arguments)

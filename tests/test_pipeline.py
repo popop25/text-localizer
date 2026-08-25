@@ -6,7 +6,11 @@ from PIL import Image
 from text_localizer.cache import TranslationCache
 from text_localizer.domain import NormalizedBox, Point
 from text_localizer.glossary import Glossary, GlossaryEntry
-from text_localizer.pipeline import analyze_static_image, relocalize_static_analysis
+from text_localizer.pipeline import (
+    TRANSLATION_CACHE_REVISION,
+    analyze_static_image,
+    relocalize_static_analysis,
+)
 from text_localizer.providers.base import OcrOutput, OcrRegion
 from text_localizer.quality import AnalysisOptions
 
@@ -244,3 +248,111 @@ def test_relocalization_regenerates_deterministic_technical_labels(
     assert relocalized["regions"][0]["translated_text"] == ("[\u6f14\u7fd2] Tool Calling")
     assert relocalized["regions"][0]["translation_reused"] is False
     assert relocalized["metrics"]["translation_reused_count"] == 0
+
+
+class ProtectedTermFallbackOcrProvider:
+    name = "protected-term-fallback-ocr"
+
+    def recognize(self, image_path: Path) -> OcrOutput:
+        del image_path
+        return OcrOutput(
+            latency_ms=3.0,
+            regions=(
+                OcrRegion(
+                    polygon=(
+                        Point(0.1, 0.1),
+                        Point(0.8, 0.1),
+                        Point(0.8, 0.25),
+                        Point(0.1, 0.25),
+                    ),
+                    bbox=NormalizedBox(0.1, 0.1, 0.7, 0.15),
+                    source_text="LangChain 기반 앱 개발",
+                    confidence=0.98,
+                ),
+            ),
+        )
+
+
+class AcceptedProtectedTermFallbackTranslator:
+    name = "accepted-protected-term-fallback-translator"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def translate(self, source_text: str) -> str:
+        return self.translate_many((source_text,))[0]
+
+    def translate_many(self, source_texts: Sequence[str]) -> tuple[str, ...]:
+        sources = tuple(source_texts)
+        self.calls.append(sources)
+        if sources == ("<TERM0> 기반 앱 개발",):
+            return ("アプリ開発",)
+        if sources == ("LangChain 기반 앱 개발",):
+            return ("LangChainベースのアプリ開発",)
+        raise AssertionError(f"unexpected translation inputs: {sources}")
+
+
+def test_pipeline_accepts_unprotected_retry_only_after_quality_passes(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "frame.png"
+    Image.new("RGB", (800, 450), "white").save(image_path)
+    translator = AcceptedProtectedTermFallbackTranslator()
+
+    payload = analyze_static_image(
+        image_path,
+        tmp_path / "output",
+        ProtectedTermFallbackOcrProvider(),
+        translator,
+        TranslationCache(tmp_path / "cache.sqlite3"),
+        glossary=Glossary((GlossaryEntry("LangChain", "LangChain"),)),
+        options=AnalysisOptions(),
+    )
+
+    assert translator.calls == [
+        ("<TERM0> 기반 앱 개발",),
+        ("LangChain 기반 앱 개발",),
+    ]
+    region = payload["regions"][0]
+    assert region["translated_text"] == "LangChainベースのアプリ開発"
+    assert region["translation_quality_flags"] == []
+    assert region["translation_fallback_attempted"] is True
+    assert region["translation_fallback_used"] is True
+    assert region["needs_review"] is False
+    assert payload["metrics"]["translation_batch_count"] == 2
+    assert payload["metrics"]["translation_fallback_attempted_count"] == 1
+    assert payload["metrics"]["translation_fallback_accepted_count"] == 1
+
+
+def test_pipeline_retries_flagged_cached_translation(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "frame.png"
+    Image.new("RGB", (800, 450), "white").save(image_path)
+    glossary = Glossary((GlossaryEntry("LangChain", "LangChain"),))
+    translator = AcceptedProtectedTermFallbackTranslator()
+    cache = TranslationCache(tmp_path / "cache.sqlite3")
+    cache_namespace = (
+        f"{glossary.cache_namespace(translator.name)}:pipeline:{TRANSLATION_CACHE_REVISION}"
+    )
+    cache.put(cache_namespace, "LangChain 기반 앱 개발", "アプリ開発")
+
+    payload = analyze_static_image(
+        image_path,
+        tmp_path / "output",
+        ProtectedTermFallbackOcrProvider(),
+        translator,
+        cache,
+        glossary=glossary,
+        options=AnalysisOptions(),
+    )
+
+    assert translator.calls == [("LangChain 기반 앱 개발",)]
+    region = payload["regions"][0]
+    assert region["translated_text"] == "LangChainベースのアプリ開発"
+    assert region["translation_cache_hit"] is False
+    assert region["translation_fallback_attempted"] is True
+    assert region["translation_fallback_used"] is True
+    assert payload["metrics"]["translation_batch_count"] == 1
+    assert payload["metrics"]["translation_fallback_attempted_count"] == 1
+    assert payload["metrics"]["translation_fallback_accepted_count"] == 1

@@ -27,7 +27,7 @@ from text_localizer.quality import (
 from text_localizer.rendering import render_preview
 from text_localizer.viewer import write_viewer
 
-TRANSLATION_CACHE_REVISION = "m15-v2"
+TRANSLATION_CACHE_REVISION = "m23-v1"
 
 
 @dataclass(slots=True)
@@ -40,6 +40,8 @@ class _RegionWork:
     translation_cache_hit: bool = False
     translation_quality_flags: tuple[str, ...] = ()
     translation_reused: bool = False
+    translation_fallback_attempted: bool = False
+    translation_fallback_used: bool = False
 
 
 def analyze_static_image(
@@ -74,7 +76,12 @@ def analyze_static_image(
         f"{active_glossary.cache_namespace(translation_provider.name)}"
         f":pipeline:{TRANSLATION_CACHE_REVISION}"
     )
-    total_translation_latency_ms, translation_batch_count = _translate_regions(
+    (
+        total_translation_latency_ms,
+        translation_batch_count,
+        translation_fallback_attempted_count,
+        translation_fallback_accepted_count,
+    ) = _translate_regions(
         work,
         translation_provider,
         cache,
@@ -128,6 +135,8 @@ def analyze_static_image(
             "ocr_reused": False,
             "total_translation_latency_ms": total_translation_latency_ms,
             "translation_batch_count": translation_batch_count,
+            "translation_fallback_attempted_count": translation_fallback_attempted_count,
+            "translation_fallback_accepted_count": translation_fallback_accepted_count,
             "total_processing_latency_ms": total_latency_ms,
             "translation_reused_count": 0,
             "peak_process_memory_bytes": peak_bytes,
@@ -179,7 +188,12 @@ def relocalize_static_analysis(
         f"{glossary.cache_namespace(translation_provider.name)}"
         f":pipeline:{TRANSLATION_CACHE_REVISION}"
     )
-    total_translation_latency_ms, translation_batch_count = _translate_regions(
+    (
+        total_translation_latency_ms,
+        translation_batch_count,
+        translation_fallback_attempted_count,
+        translation_fallback_accepted_count,
+    ) = _translate_regions(
         work,
         translation_provider,
         cache,
@@ -242,6 +256,8 @@ def relocalize_static_analysis(
             "ocr_reused": True,
             "total_translation_latency_ms": total_translation_latency_ms,
             "translation_batch_count": translation_batch_count,
+            "translation_fallback_attempted_count": translation_fallback_attempted_count,
+            "translation_fallback_accepted_count": translation_fallback_accepted_count,
             "translation_reused_count": translation_reused_count,
             "total_processing_latency_ms": total_latency_ms,
             "peak_process_memory_bytes": peak_bytes,
@@ -376,8 +392,9 @@ def _translate_regions(
     cache_namespace: str,
     glossary: Glossary,
     batch_size: int,
-) -> tuple[float, int]:
+) -> tuple[float, int, int, int]:
     pending: list[_RegionWork] = []
+    fallback_pending: list[_RegionWork] = []
     for item in work:
         if item.region.action is not RegionAction.TRANSLATE:
             continue
@@ -393,6 +410,10 @@ def _translate_regions(
                 cached,
                 item.prepared.prepared_text,
             )
+            if _should_retry_without_placeholders(item.translation_quality_flags):
+                item.translation_cache_hit = False
+                item.translation_fallback_attempted = True
+                fallback_pending.append(item)
             continue
         if not item.prepared.prepared_text.requires_model_translation:
             restored, restore_flags = glossary.restore(
@@ -440,7 +461,59 @@ def _translate_regions(
                 restore_flags,
             )
             cache.put(cache_namespace, item.region.source_text, restored)
-    return total_latency_ms, batch_count
+            if _should_retry_without_placeholders(item.translation_quality_flags):
+                item.translation_fallback_attempted = True
+                fallback_pending.append(item)
+
+    fallback_accepted_count = 0
+    for offset in range(0, len(fallback_pending), batch_size):
+        batch = fallback_pending[offset : offset + batch_size]
+        source_texts = [item.region.source_text for item in batch]
+        batch_started = perf_counter()
+        translations = provider.translate_many(source_texts)
+        batch_latency_ms = (perf_counter() - batch_started) * 1000.0
+        if len(translations) != len(batch):
+            raise RuntimeError(
+                "Translation provider returned a different number of results than inputs."
+            )
+        total_latency_ms += batch_latency_ms
+        batch_count += 1
+        amortized_latency_ms = batch_latency_ms / len(batch)
+        for item, translated in zip(batch, translations, strict=True):
+            restored, restore_flags = glossary.restore(
+                translated,
+                item.prepared.prepared_text,
+            )
+            fallback_flags = evaluate_translation(
+                item.region.source_text,
+                restored,
+                item.prepared.prepared_text,
+                restore_flags,
+            )
+            item.translation_latency_ms = (
+                item.translation_latency_ms or 0.0
+            ) + amortized_latency_ms
+            if fallback_flags:
+                continue
+            item.translated_text = restored
+            item.translation_quality_flags = ()
+            item.translation_fallback_used = True
+            fallback_accepted_count += 1
+            cache.put(cache_namespace, item.region.source_text, restored)
+
+    return (
+        total_latency_ms,
+        batch_count,
+        len(fallback_pending),
+        fallback_accepted_count,
+    )
+
+
+def _should_retry_without_placeholders(flags: tuple[str, ...]) -> bool:
+    return any(
+        flag.startswith("missing_placeholder:") or flag.startswith("missing_glossary_target:")
+        for flag in flags
+    )
 
 
 def _region_payload(item: _RegionWork) -> dict[str, Any]:
@@ -459,6 +532,8 @@ def _region_payload(item: _RegionWork) -> dict[str, Any]:
         "translated_text": item.translated_text,
         "translation_latency_ms": item.translation_latency_ms,
         "translation_cache_hit": item.translation_cache_hit,
+        "translation_fallback_attempted": item.translation_fallback_attempted,
+        "translation_fallback_used": item.translation_fallback_used,
         "translation_quality_flags": list(item.translation_quality_flags),
         "needs_review": bool(item.translation_quality_flags),
         "translation_reused": item.translation_reused,

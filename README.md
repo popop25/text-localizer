@@ -54,6 +54,11 @@ policy, strict schema-v2 resume checks, and representative-image fingerprints th
 stale OCR reuse. It also restores command-level `render-tracks` execution. See
 `docs/m2.2-exact-timestamp-sampling.md` for the diagnosis and full-video validation.
 
+M2.3 adds a quality-gated raw-source retry for failed protected-term translations, records
+fallback audit metrics, and makes the recurring LangChain course objective deterministic in
+the saved profile. See `docs/m2.3-protected-term-fallback.md` for the failure probes and
+zero-review automatic full-video validation.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 

@@ -19,6 +19,7 @@ _MISSING_SPACE_AFTER_PUNCTUATION_RE = re.compile(r"(?<=[,;:])(?=\S)")
 _MISSING_SPACE_AFTER_BRACKET_RE = re.compile(r"(?<=[\]\)])(?=[A-Za-z\uac00-\ud7a3])")
 _LEADING_NUMBERED_TEXT_RE = re.compile(r"^(\d+)(?=[A-Za-z\uac00-\ud7a3])")
 _PLACEHOLDER_RE = re.compile(r"<TERM(\d+)>")
+_HANGUL_RE = re.compile(r"[\uac00-\ud7a3]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,11 @@ class PreparedText:
     def glossary_only(self) -> bool:
         without_terms = _PLACEHOLDER_RE.sub("", self.protected_text)
         return not without_terms.strip()
+
+    @property
+    def requires_model_translation(self) -> bool:
+        without_terms = _PLACEHOLDER_RE.sub("", self.protected_text)
+        return bool(_HANGUL_RE.search(without_terms))
 
 
 class Glossary:
@@ -109,7 +115,7 @@ class Glossary:
         for entry in sorted(self.entries, key=_longest_alias, reverse=True):
             for alias in sorted(entry.aliases, key=len, reverse=True):
                 placeholder = f"\ue000{len(alias_replacements)}\ue001"
-                replaced, count = _replace_term(normalized, alias, placeholder)
+                replaced, count = _replace_alias(normalized, alias, entry.source, placeholder)
                 if count:
                     normalized = replaced
                     alias_replacements.append((placeholder, entry.source))
@@ -199,6 +205,25 @@ def _replace_term(
     flags = re.IGNORECASE if source.isascii() else 0
     pattern = re.compile(re.escape(source), flags)
     return pattern.subn(lambda _: replacement, text, count=count)
+
+
+def _replace_alias(
+    text: str,
+    alias: str,
+    source: str,
+    replacement: str,
+) -> tuple[str, int]:
+    if not alias:
+        return text, 0
+    flags = re.IGNORECASE if alias.isascii() else 0
+    suffix = ""
+    if source.casefold().startswith(alias.casefold()):
+        suffix = source[len(alias) :]
+    pattern_text = re.escape(alias)
+    if suffix:
+        pattern_text += rf"(?!{re.escape(suffix)})"
+    pattern = re.compile(pattern_text, flags)
+    return pattern.subn(lambda _: replacement, text)
 
 
 def _literal_replacement(value: str) -> Callable[[re.Match[str]], str]:

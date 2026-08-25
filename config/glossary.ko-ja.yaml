@@ -56,6 +56,10 @@ entries:
     target: 教材を見る
   - source: 교안
     target: 教材
+  - source: "[실습]"
+    target: "[演習]"
+    aliases:
+      - "[실]"
   - source: 실습
     target: 演習
   - source: 과제

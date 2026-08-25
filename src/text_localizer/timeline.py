@@ -10,7 +10,11 @@ from text_localizer.boundaries import refine_video_scene_boundaries
 from text_localizer.cache import TranslationCache
 from text_localizer.domain import NormalizedBox
 from text_localizer.glossary import Glossary
-from text_localizer.pipeline import analyze_static_image
+from text_localizer.pipeline import (
+    TRANSLATION_CACHE_REVISION,
+    analyze_static_image,
+    relocalize_static_analysis,
+)
 from text_localizer.profile import SceneDetectionOptions
 from text_localizer.providers.base import OcrProvider, TranslationProvider
 from text_localizer.quality import AnalysisOptions, box_to_dict
@@ -130,12 +134,14 @@ def build_track_manifest(
     analysis_paths: dict[int, str] | None = None,
     analysis_reused_count: int = 0,
     current_run_latency_ms: float = 0.0,
+    analysis_relocalized_count: int = 0,
 ) -> dict[str, Any]:
     tracks: list[dict[str, Any]] = []
     total_ocr_latency_ms = 0.0
     total_translation_latency_ms = 0.0
     total_scene_processing_latency_ms = 0.0
     needs_review_count = 0
+    translation_reused_count = 0
 
     for raw_scene in scene_index["scenes"]:
         scene_id = int(raw_scene["scene_id"])
@@ -147,6 +153,7 @@ def build_track_manifest(
         total_translation_latency_ms += float(metrics.get("total_translation_latency_ms", 0.0))
         total_scene_processing_latency_ms += float(metrics.get("total_processing_latency_ms", 0.0))
         needs_review_count += int(metrics.get("needs_review_count", 0))
+        translation_reused_count += int(metrics.get("translation_reused_count", 0))
         tracks.append(
             {
                 "track_id": f"scene-{scene_id:04d}",
@@ -174,6 +181,8 @@ def build_track_manifest(
             "duplicate_frame_count": scene_index["duplicate_frames"],
             "reuse_ratio": scene_index["reuse_ratio"],
             "analysis_reused_count": analysis_reused_count,
+            "analysis_relocalized_count": analysis_relocalized_count,
+            "translation_reused_count": translation_reused_count,
             "total_ocr_latency_ms": total_ocr_latency_ms,
             "total_translation_latency_ms": total_translation_latency_ms,
             "total_scene_processing_latency_ms": total_scene_processing_latency_ms,
@@ -203,6 +212,7 @@ def localize_scene_index(
     analysis_paths: dict[int, str] = {}
     reused_count = 0
 
+    relocalized_count = 0
     scenes = scene_index["scenes"]
     for position, raw_scene in enumerate(scenes, start=1):
         scene_id = int(raw_scene["scene_id"])
@@ -218,21 +228,45 @@ def localize_scene_index(
             analysis_options=analysis_options,
         )
         if analysis is None:
-            LOGGER.info(
-                "Analyzing scene %d/%d at %.3fs",
-                position,
-                len(scenes),
-                float(raw_scene["start_seconds"]),
-            )
-            analysis = analyze_static_image(
+            prior_analysis = _load_relocalizable_analysis(
+                regions_path,
                 representative,
-                scene_output,
-                ocr_provider,
-                translation_provider,
-                cache,
-                glossary=glossary,
-                options=analysis_options,
+                ocr_provider_name=ocr_provider.name,
+                analysis_options=analysis_options,
             )
+            if prior_analysis is not None:
+                LOGGER.info(
+                    "Relocalizing stored OCR for scene %d/%d",
+                    position,
+                    len(scenes),
+                )
+                analysis = relocalize_static_analysis(
+                    representative,
+                    scene_output,
+                    prior_analysis,
+                    ocr_provider,
+                    translation_provider,
+                    cache,
+                    glossary=glossary,
+                    options=analysis_options,
+                )
+                relocalized_count += 1
+            else:
+                LOGGER.info(
+                    "Analyzing scene %d/%d at %.3fs",
+                    position,
+                    len(scenes),
+                    float(raw_scene["start_seconds"]),
+                )
+                analysis = analyze_static_image(
+                    representative,
+                    scene_output,
+                    ocr_provider,
+                    translation_provider,
+                    cache,
+                    glossary=glossary,
+                    options=analysis_options,
+                )
         else:
             reused_count += 1
             LOGGER.info("Reusing completed analysis for scene %d/%d", position, len(scenes))
@@ -246,6 +280,7 @@ def localize_scene_index(
         analysis_paths=analysis_paths,
         analysis_reused_count=reused_count,
         current_run_latency_ms=current_run_latency_ms,
+        analysis_relocalized_count=relocalized_count,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(output_dir / "tracks.json", manifest)
@@ -324,6 +359,8 @@ def _load_matching_analysis(
         payload = cast(dict[str, Any], raw_payload)
         if payload.get("schema_version") != 2:
             return None
+        if payload.get("translation_cache_revision") != TRANSLATION_CACHE_REVISION:
+            return None
         if Path(str(payload["input_image"])).resolve() != representative.resolve():
             return None
         if payload.get("ocr_provider") != ocr_provider_name:
@@ -331,6 +368,35 @@ def _load_matching_analysis(
         if payload.get("translation_provider") != translation_provider_name:
             return None
         if payload.get("glossary_fingerprint") != glossary_fingerprint:
+            return None
+        if not _analysis_options_match(payload.get("analysis_options"), analysis_options):
+            return None
+        if not isinstance(payload.get("regions"), list):
+            return None
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return payload
+
+
+def _load_relocalizable_analysis(
+    regions_path: Path,
+    representative: Path,
+    *,
+    ocr_provider_name: str,
+    analysis_options: AnalysisOptions,
+) -> dict[str, Any] | None:
+    if not regions_path.is_file():
+        return None
+    try:
+        raw_payload = json.loads(regions_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_payload, dict):
+            return None
+        payload = cast(dict[str, Any], raw_payload)
+        if payload.get("schema_version") != 2:
+            return None
+        if Path(str(payload["input_image"])).resolve() != representative.resolve():
+            return None
+        if payload.get("ocr_provider") != ocr_provider_name:
             return None
         if not _analysis_options_match(payload.get("analysis_options"), analysis_options):
             return None

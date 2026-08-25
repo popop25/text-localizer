@@ -22,6 +22,9 @@ protected glossary terms, conservative same-line grouping, batched translation, 
 automatic review flags. See `docs/m1.1-quality-hardening.md` for the design and measured
 sample results.
 
+M1.2 adds reusable YAML localization profiles and ROI-aware frame scene deduplication before
+OCR. See `docs/m1.2-scene-dedup-profiles.md` for the scene-index schema and measurements.
+
 The source image and original MP4 are never modified. The static pipeline works on an
 extracted frame; temporal tracking and final video rendering are intentionally outside M1.1.
 
@@ -73,6 +76,7 @@ text-localizer doctor --json
 text-localizer inspect-video data\input\sample.mp4
 text-localizer extract-frames data\input\sample.mp4 --count 20
 text-localizer analyze-image data\work\frames\frame-0001.png --output data\output\frame-0001
+text-localizer deduplicate-frames data\work\frames --output data\work\scene-index.json
 ```
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
@@ -89,6 +93,21 @@ text-localizer analyze-image data\work\frames\frame-0001.png `
 
 `--exclude-roi` is repeatable. Translation batches default to four items and can be changed
 with `--translation-batch-size`. Use `--no-group-adjacent` to disable same-line grouping.
+
+The tested browser layout can be reused through a saved profile:
+
+```powershell
+text-localizer analyze-image data\work\frames\frame-0001.png `
+  --profile config\profiles\browser-lecture.yaml
+
+text-localizer deduplicate-frames data\work\frames `
+  --profile config\profiles\browser-lecture.yaml `
+  --output data\work\scene-index.json
+```
+
+Scene indexing hashes only the ROI, masks configured exclusions, keeps every source frame,
+and writes auditable representative and distance decisions. It does not load OCR or
+translation models.
 
 `analyze-image` writes:
 

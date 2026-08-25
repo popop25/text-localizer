@@ -23,8 +23,16 @@ class PaddleOcrProvider:
                 "'text-localizer setup-models --ocr' explicitly first."
             )
 
+        self._models_root = models_root
+        self._pipeline: Any = None
+        self._confidence_threshold = confidence_threshold
+
+    def _get_pipeline(self) -> Any:
+        if self._pipeline is not None:
+            return self._pipeline
+
         os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
-        os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(models_root / "paddleocr"))
+        os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(self._models_root / "paddleocr"))
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         try:
             paddleocr_module = importlib.import_module("paddleocr")
@@ -34,7 +42,7 @@ class PaddleOcrProvider:
                 "PaddleOCR dependencies are unavailable. Install the 'ocr' extra."
             ) from exc
 
-        self._pipeline: Any = paddleocr_class(
+        self._pipeline = paddleocr_class(
             text_detection_model_name="PP-OCRv5_mobile_det",
             text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
             enable_mkldnn=False,
@@ -43,14 +51,14 @@ class PaddleOcrProvider:
             use_doc_unwarping=False,
             use_textline_orientation=False,
         )
-        self._confidence_threshold = confidence_threshold
+        return self._pipeline
 
     def recognize(self, image_path: Path) -> OcrOutput:
         with Image.open(image_path) as image:
             width, height = image.size
 
         started = perf_counter()
-        prediction = self._pipeline.predict(str(image_path))
+        prediction = self._get_pipeline().predict(str(image_path))
         latency_ms = (perf_counter() - started) * 1000.0
         regions: list[OcrRegion] = []
 

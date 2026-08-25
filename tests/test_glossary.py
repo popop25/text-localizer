@@ -69,3 +69,44 @@ def test_glossary_yaml_validation_and_fingerprint(tmp_path: Path) -> None:
     assert first.entries[0].aliases == ("OpenAl AP",)
     assert first.fingerprint == second.fingerprint
     assert first.cache_namespace("fake") != "fake"
+
+
+def test_alias_prefix_does_not_mutate_already_canonical_terms() -> None:
+    glossary = Glossary(
+        (
+            GlossaryEntry("Azure OpenAI", "Azure OpenAI", ("Azure OpenA",)),
+            GlossaryEntry("OpenAI API", "OpenAI API", ("OpenAI AP",)),
+        )
+    )
+
+    prepared = glossary.prepare("Azure OpenAI \uc640 OpenAI API")
+
+    assert prepared.normalized_text == "Azure OpenAI \uc640 OpenAI API"
+    assert "OpenAII" not in prepared.normalized_text
+    assert prepared.normalization_edits == ()
+
+
+def test_bracketed_ocr_alias_can_be_restored_without_model_translation() -> None:
+    glossary = Glossary(
+        (
+            GlossaryEntry("[\uc2e4\uc2b5]", "[\u6f14\u7fd2]", ("[\uc2e4]",)),
+            GlossaryEntry("LangGraph", "LangGraph"),
+            GlossaryEntry("\uae30\ucd08", "\u57fa\u790e"),
+        )
+    )
+
+    prepared = glossary.prepare("[\uc2e4]LangGraph\uae30\ucd08")
+    restored, flags = glossary.restore(prepared.protected_text, prepared)
+
+    assert prepared.normalized_text == "[\uc2e4\uc2b5] LangGraph \uae30\ucd08"
+    assert prepared.requires_model_translation is False
+    assert restored == "[\u6f14\u7fd2] LangGraph \u57fa\u790e"
+    assert flags == ()
+
+
+def test_unprotected_hangul_still_requires_full_sentence_translation() -> None:
+    prepared = Glossary((GlossaryEntry("Agent", "Agent"),)).prepare(
+        "Agent\ub97c \uac1c\ubc1c\ud55c\ub2e4"
+    )
+
+    assert prepared.requires_model_translation is True

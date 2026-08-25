@@ -34,8 +34,14 @@ M1.4 adds no-OCR scene-boundary bisection, a local browser track editor, edited-
 validation, and viewer regeneration. See `docs/m1.4-refined-boundaries-editor.md` for the
 workflow and full-video measurements.
 
+M1.5 hardens the translation review loop with safe glossary alias normalization,
+deterministic glossary-only labels, stored-OCR relocalization, selective translation reuse,
+analysis-revision invalidation, and lazy OCR/translation model loading. See
+`docs/m1.5-review-roundtrip-hardening.md` for the model probes, design decisions, and
+full-video measurements.
 
-The source image and original MP4 are never modified. M1.4 produces editable temporal overlay
+
+The source image and original MP4 are never modified. M1.5 produces editable temporal overlay
 data, a review player, and an offline editor; final video rendering remains outside this scope.
 
 ## Requirements
@@ -144,6 +150,10 @@ inside detected transition brackets and does not add OCR calls. `localize-video`
 timestamped samples, analyzes only scene representatives, and resumes from matching per-scene
 `regions.json` files. It writes `tracks.json`, `viewer.html`, and `editor.html`; the viewer
 references the unchanged source MP4 and suppresses regions carrying automatic review flags.
+If the glossary or analysis revision changes while OCR geometry and analysis options still
+match, `localize-video` re-runs normalization and translation from stored OCR instead of
+loading PaddleOCR again. Prior model translations are reused only when the provider and
+normalized source match and current quality checks still pass.
 After editing and exporting JSON in the browser, use `render-tracks` to validate the complete
 timeline and regenerate both HTML artifacts.
 

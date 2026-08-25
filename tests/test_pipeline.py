@@ -6,7 +6,7 @@ from PIL import Image
 from text_localizer.cache import TranslationCache
 from text_localizer.domain import NormalizedBox, Point
 from text_localizer.glossary import Glossary, GlossaryEntry
-from text_localizer.pipeline import analyze_static_image
+from text_localizer.pipeline import analyze_static_image, relocalize_static_analysis
 from text_localizer.providers.base import OcrOutput, OcrRegion
 from text_localizer.quality import AnalysisOptions
 
@@ -170,3 +170,77 @@ def test_pipeline_batches_translation_and_restores_glossary_terms(tmp_path: Path
         "LangChainベースのAgent開発",
     ]
     assert all(not item["needs_review"] for item in payload["regions"])
+
+
+class LabelOcrProvider:
+    name = "label-ocr"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def recognize(self, image_path: Path) -> OcrOutput:
+        del image_path
+        self.calls += 1
+        return OcrOutput(
+            latency_ms=4.0,
+            regions=(
+                OcrRegion(
+                    polygon=(
+                        Point(0.1, 0.1),
+                        Point(0.8, 0.1),
+                        Point(0.8, 0.25),
+                        Point(0.1, 0.25),
+                    ),
+                    bbox=NormalizedBox(0.1, 0.1, 0.7, 0.15),
+                    source_text="[\uc2e4]Tool Calling",
+                    confidence=0.98,
+                ),
+            ),
+        )
+
+
+class UnexpectedTranslationProvider:
+    name = "unexpected-translator"
+
+    def translate(self, source_text: str) -> str:
+        return self.translate_many((source_text,))[0]
+
+    def translate_many(self, source_texts: Sequence[str]) -> tuple[str, ...]:
+        raise AssertionError(f"unexpected model translation: {tuple(source_texts)}")
+
+
+def test_relocalization_regenerates_deterministic_technical_labels(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "frame.png"
+    Image.new("RGB", (800, 450), "white").save(image_path)
+    glossary = Glossary((GlossaryEntry("[\uc2e4\uc2b5]", "[\u6f14\u7fd2]", ("[\uc2e4]",)),))
+    ocr = LabelOcrProvider()
+    translator = UnexpectedTranslationProvider()
+    cache = TranslationCache(tmp_path / "cache.sqlite3")
+    prior = analyze_static_image(
+        image_path,
+        tmp_path / "old-output",
+        ocr,
+        translator,
+        cache,
+        glossary=glossary,
+        options=AnalysisOptions(),
+    )
+    prior["regions"][0]["translated_text"] = "[\u6f14\u7fd2] \u30c4\u30fc\u30eb Calling"
+
+    relocalized = relocalize_static_analysis(
+        image_path,
+        tmp_path / "new-output",
+        prior,
+        ocr,
+        translator,
+        cache,
+        glossary=glossary,
+        options=AnalysisOptions(),
+    )
+
+    assert ocr.calls == 1
+    assert relocalized["regions"][0]["translated_text"] == ("[\u6f14\u7fd2] Tool Calling")
+    assert relocalized["regions"][0]["translation_reused"] is False
+    assert relocalized["metrics"]["translation_reused_count"] == 0

@@ -15,6 +15,14 @@ class M2M100TranslationProvider:
                 "M2M100 model files are not prepared. Run "
                 "'text-localizer setup-models --translation' explicitly first."
             )
+        self._model_dir = model_dir
+        self._tokenizer: Any = None
+        self._model: Any = None
+        self._torch: Any = None
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None:
+            return
         try:
             transformers: Any = importlib.import_module("transformers")
             torch: Any = importlib.import_module("torch")
@@ -25,12 +33,12 @@ class M2M100TranslationProvider:
 
         tokenizer_class = transformers.M2M100Tokenizer
         model_class = transformers.M2M100ForConditionalGeneration
-        self._tokenizer: Any = tokenizer_class.from_pretrained(
-            str(model_dir),
+        self._tokenizer = tokenizer_class.from_pretrained(
+            str(self._model_dir),
             local_files_only=True,
         )
-        self._model: Any = model_class.from_pretrained(
-            str(model_dir),
+        self._model = model_class.from_pretrained(
+            str(self._model_dir),
             local_files_only=True,
         )
         self._tokenizer.src_lang = "ko"
@@ -44,6 +52,7 @@ class M2M100TranslationProvider:
     def translate_many(self, source_texts: Sequence[str]) -> tuple[str, ...]:
         if not source_texts:
             return ()
+        self._ensure_loaded()
         encoded = self._tokenizer(list(source_texts), return_tensors="pt", padding=True)
         forced_bos_token_id = self._tokenizer.get_lang_id("ja")
         with self._torch.inference_mode():

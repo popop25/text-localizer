@@ -14,9 +14,15 @@ from text_localizer.environment import run_doctor
 from text_localizer.glossary import Glossary
 from text_localizer.logging_config import configure_logging
 from text_localizer.pipeline import analyze_static_image
+from text_localizer.profile import (
+    SceneDetectionOptions,
+    load_profile,
+    merge_analysis_options,
+    resolve_glossary_path,
+)
 from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
-from text_localizer.quality import AnalysisOptions
+from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.video import extract_representative_frames, inspect_video
 
@@ -41,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("path", type=Path)
     analyze.add_argument("--output", type=Path)
     analyze.add_argument("--models-root", type=Path, default=Path("models"))
+    analyze.add_argument("--profile", type=Path)
     analyze.add_argument(
         "--cache",
         type=Path,
@@ -49,7 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument(
         "--glossary",
         type=Path,
-        default=Path("config/glossary.ko-ja.yaml"),
     )
     analyze.add_argument(
         "--roi",
@@ -63,9 +69,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Ignore regions centered inside normalized x,y,width,height (repeatable)",
     )
-    analyze.add_argument("--min-region-height", type=float, default=0.0)
-    analyze.add_argument("--translation-batch-size", type=int, default=4)
-    analyze.add_argument("--no-group-adjacent", action="store_true")
+    analyze.add_argument("--min-region-height", type=float)
+    analyze.add_argument("--translation-batch-size", type=int)
+    analyze.add_argument(
+        "--group-adjacent",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+
+    deduplicate = subparsers.add_parser(
+        "deduplicate-frames",
+        help="Index consecutive frame scenes using an ROI-aware perceptual hash",
+    )
+    deduplicate.add_argument("path", type=Path, help="Directory containing frame images")
+    deduplicate.add_argument("--profile", type=Path)
+    deduplicate.add_argument("--pattern", default="frame-*.png")
+    deduplicate.add_argument("--output", type=Path)
+    deduplicate.add_argument("--roi", type=_parse_normalized_box)
+    deduplicate.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+    )
+    deduplicate.add_argument("--hash-size", type=int)
+    deduplicate.add_argument("--hamming-threshold", type=int)
 
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
@@ -120,13 +148,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "analyze-image":
             output = args.output or Path("data/output") / args.path.stem
+            profile = load_profile(args.profile) if args.profile is not None else None
             ocr_provider = PaddleOcrProvider(args.models_root)
             translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
-            options = AnalysisOptions(
+            options = merge_analysis_options(
+                profile,
                 roi=args.roi,
                 exclude_regions=tuple(args.exclude_roi),
                 min_region_height=args.min_region_height,
-                group_adjacent=not args.no_group_adjacent,
+                group_adjacent=args.group_adjacent,
                 translation_batch_size=args.translation_batch_size,
             )
             payload = analyze_static_image(
@@ -135,8 +165,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ocr_provider,
                 translation_provider,
                 TranslationCache(args.cache),
-                glossary=Glossary.from_yaml(args.glossary),
+                glossary=Glossary.from_yaml(resolve_glossary_path(profile, args.glossary)),
                 options=options,
+            )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "deduplicate-frames":
+            profile = load_profile(args.profile) if args.profile is not None else None
+            analysis_options = merge_analysis_options(
+                profile,
+                roi=args.roi,
+                exclude_regions=tuple(args.exclude_roi),
+            )
+            base_scene_options = (
+                profile.scene_detection if profile is not None else SceneDetectionOptions()
+            )
+            scene_options = SceneDetectionOptions(
+                hash_size=(
+                    args.hash_size if args.hash_size is not None else base_scene_options.hash_size
+                ),
+                hamming_threshold=(
+                    args.hamming_threshold
+                    if args.hamming_threshold is not None
+                    else base_scene_options.hamming_threshold
+                ),
+            )
+            output = args.output or args.path / "scene-index.json"
+            payload = index_frame_directory(
+                args.path,
+                pattern=args.pattern,
+                output_path=output,
+                profile_name=profile.name if profile is not None else None,
+                roi=analysis_options.roi,
+                exclude_regions=analysis_options.exclude_regions,
+                options=scene_options,
             )
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0

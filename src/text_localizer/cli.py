@@ -28,6 +28,7 @@ from text_localizer.setup_models import setup_ocr_models, setup_translation_mode
 from text_localizer.timeline import index_video_timeline, localize_scene_index
 from text_localizer.track_editor import load_track_manifest, write_track_editor
 from text_localizer.video import extract_representative_frames, inspect_video
+from text_localizer.video_renderer import VideoRenderOptions, render_localized_video
 from text_localizer.video_viewer import write_video_viewer
 
 
@@ -159,6 +160,16 @@ def build_parser() -> argparse.ArgumentParser:
     render_tracks.add_argument("path", type=Path)
     render_tracks.add_argument("--output", type=Path)
     render_tracks.add_argument("--video", type=Path)
+    render_video = subparsers.add_parser(
+        "render-video",
+        help="Burn approved Japanese tracks into a new H.264 MP4",
+    )
+    render_video.add_argument("path", type=Path, help="Validated tracks JSON")
+    render_video.add_argument("--output", type=Path)
+    render_video.add_argument("--video", type=Path)
+    render_video.add_argument("--crf", type=int, default=18)
+    render_video.add_argument("--preset", default="medium")
+    render_video.add_argument("--overwrite", action="store_true")
 
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
@@ -271,6 +282,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "render-tracks":
             manifest = load_track_manifest(args.path)
+        if args.command == "render-video":
+            output = args.output or args.path.with_name("localized.mp4")
+            report = render_localized_video(
+                args.path,
+                output,
+                video_path=args.video,
+                options=VideoRenderOptions(
+                    crf=args.crf,
+                    preset=args.preset,
+                    overwrite=args.overwrite,
+                ),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+
             video_path = args.video or Path(str(manifest["video"]["path"]))
             output = args.output or args.path.parent
             write_video_viewer(output / "viewer.html", video_path, manifest)
@@ -341,7 +367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 prepared["translation"] = str(setup_translation_model(args.models_root))
             print(json.dumps(prepared, indent=2))
             return 0
-    except (FileNotFoundError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

@@ -1,8 +1,9 @@
 # text-localizer
 
 `text-localizer` is a Windows-native, CPU-only pipeline for detecting Korean text in
-lecture or screen-recording video frames and producing editable Japanese overlay data.
-The original MP4 is never modified.
+lecture or screen-recording video frames, producing editable Japanese overlay data, and
+rendering an approved timeline into a separate localized MP4. The original MP4 is never
+modified.
 
 ## Current milestone
 
@@ -40,9 +41,12 @@ analysis-revision invalidation, and lazy OCR/translation model loading. See
 `docs/m1.5-review-roundtrip-hardening.md` for the model probes, design decisions, and
 full-video measurements.
 
+M2 renders a zero-review timeline through ASS/libass into a separate H.264 MP4, copies the
+original audio streams without re-encoding, validates the finished media, and writes an audit
+report. See `docs/m2-final-mp4-rendering.md` for safeguards and full-video results.
 
-The source image and original MP4 are never modified. M1.5 produces editable temporal overlay
-data, a review player, and an offline editor; final video rendering remains outside this scope.
+The source image and original MP4 are never modified. Intermediate data, review artifacts, and
+the final rendered video stay separate from the source.
 
 ## Requirements
 
@@ -96,6 +100,7 @@ text-localizer deduplicate-frames data\work\frames --output data\work\scene-inde
 text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
+text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4
 ```
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
@@ -157,6 +162,18 @@ normalized source match and current quality checks still pass.
 After editing and exporting JSON in the browser, use `render-tracks` to validate the complete
 timeline and regenerate both HTML artifacts.
 
+Once every review flag is resolved, burn the approved overlays into a separate MP4:
+
+```powershell
+text-localizer render-video data\output\sample-timeline\tracks.edited.json `
+  --output data\output\sample-final\sample.ja.mp4
+```
+
+`render-video` refuses to overwrite the source, requires zero review flags, validates the
+source against the track manifest, renders H.264/yuv420p video with libx264, and stream-copies
+audio. It writes the MP4, the generated ASS timeline, and a `.render.json` audit report.
+Existing output artifacts require an explicit `--overwrite`.
+
 `analyze-image` writes:
 
 - `source.<ext>`: an unchanged copy of the input frame;
@@ -180,8 +197,7 @@ python -m pytest
 
 
 Without `data/input/sample.mp4`, repository, unit, CLI, and fake-provider pipeline
-validation can still complete. Real OCR quality, Korean-to-Japanese output quality, and
-CPU latency/memory measurements on the target video remain the single sample-dependent
-validation step.
+validation can still complete. Real OCR, Korean-to-Japanese output, visual overlay quality,
+and final-render latency remain sample-dependent validation steps.
 Place the user-supplied video at `data/input/sample.mp4`. Inputs, intermediate frames,
 outputs, model weights, caches, `.env` files, and virtual environments are ignored by Git.

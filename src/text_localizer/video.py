@@ -10,6 +10,8 @@ from typing import Any
 
 from text_localizer.environment import resolve_executable
 
+_TIMESTAMP_SAMPLING_POLICY = "fps-round-up-v1"
+
 
 @dataclass(frozen=True, slots=True)
 class VideoInfo:
@@ -182,12 +184,13 @@ def extract_timestamped_frames(
     """Extract fixed-interval frames, reusing a matching complete manifest when possible."""
 
     info = video_info or inspect_video(video_path)
-    interval_timestamps(info.duration_seconds, interval_seconds)
+    expected_timestamps = interval_timestamps(info.duration_seconds, interval_seconds)
     manifest_path = output_dir / "samples.json"
     reused = _load_matching_sample_manifest(
         manifest_path,
         video_path=video_path,
         interval_seconds=interval_seconds,
+        expected_timestamps=expected_timestamps,
     )
     if reused is not None:
         return reused, 0.0, True
@@ -208,7 +211,7 @@ def extract_timestamped_frames(
         "-i",
         str(video_path),
         "-vf",
-        f"fps=fps=1/{interval_seconds:.9f}:start_time=0",
+        f"fps=fps=1/{interval_seconds:.9f}:start_time=0:round=up",
         "-start_number",
         "0",
         "-y",
@@ -217,19 +220,22 @@ def extract_timestamped_frames(
     subprocess.run(command, check=True)
     latency_ms = (perf_counter() - started) * 1000.0
     paths = sorted(output_dir.glob("frame-*.png"))
-    if not paths:
-        raise RuntimeError("FFmpeg did not extract any timestamped frames.")
-    actual_timestamps = [index * interval_seconds for index in range(len(paths))]
+    if len(paths) != len(expected_timestamps):
+        raise RuntimeError(
+            f"FFmpeg extracted {len(paths)} timestamped frames; "
+            f"expected {len(expected_timestamps)}."
+        )
     frames = tuple(
         TimestampedFrame(
             index=index,
             timestamp_seconds=timestamp,
             path=str(path.resolve()),
         )
-        for index, (timestamp, path) in enumerate(zip(actual_timestamps, paths, strict=True))
+        for index, (timestamp, path) in enumerate(zip(expected_timestamps, paths, strict=True))
     )
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "sampling_policy": _TIMESTAMP_SAMPLING_POLICY,
         "video_path": str(video_path.resolve()),
         "video_size_bytes": video_path.stat().st_size,
         "interval_seconds": interval_seconds,
@@ -249,12 +255,15 @@ def _load_matching_sample_manifest(
     *,
     video_path: Path,
     interval_seconds: float,
+    expected_timestamps: list[float],
 ) -> tuple[TimestampedFrame, ...] | None:
     if not manifest_path.is_file():
         return None
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if payload.get("schema_version") != 1:
+        if payload.get("schema_version") != 2:
+            return None
+        if payload.get("sampling_policy") != _TIMESTAMP_SAMPLING_POLICY:
             return None
         if Path(str(payload["video_path"])).resolve() != video_path.resolve():
             return None
@@ -269,6 +278,8 @@ def _load_matching_sample_manifest(
             return None
         if int(payload.get("frame_count", -1)) != len(raw_frames):
             return None
+        if len(raw_frames) != len(expected_timestamps):
+            return None
         frames = tuple(
             TimestampedFrame(
                 index=int(item["index"]),
@@ -277,6 +288,12 @@ def _load_matching_sample_manifest(
             )
             for item in raw_frames
         )
+        if any(
+            frame.index != index
+            or not math.isclose(frame.timestamp_seconds, expected_timestamps[index])
+            for index, frame in enumerate(frames)
+        ):
+            return None
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
     if any(not Path(frame.path).is_file() for frame in frames):

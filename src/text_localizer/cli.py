@@ -19,6 +19,7 @@ from text_localizer.profile import (
     SceneDetectionOptions,
     load_profile,
     merge_analysis_options,
+    merge_visual_event_options,
     resolve_glossary_path,
 )
 from text_localizer.providers.m2m100 import M2M100TranslationProvider
@@ -31,6 +32,7 @@ from text_localizer.track_editor import load_track_manifest, write_track_editor
 from text_localizer.video import extract_representative_frames, inspect_video
 from text_localizer.video_renderer import VideoRenderOptions, render_localized_video
 from text_localizer.video_viewer import write_video_viewer
+from text_localizer.visual_events import index_video_visual_events
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,6 +155,28 @@ def build_parser() -> argparse.ArgumentParser:
     localize_video.add_argument("--hash-size", type=int)
     localize_video.add_argument("--hamming-threshold", type=int)
     localize_video.add_argument("--boundary-refinement-iterations", type=int, default=0)
+
+    index_visual_events = subparsers.add_parser(
+        "index-visual-events",
+        help="Index localized visual changes without loading OCR or translation models",
+    )
+    index_visual_events.add_argument("path", type=Path)
+    index_visual_events.add_argument("--profile", type=Path)
+    index_visual_events.add_argument("--work-dir", type=Path)
+    index_visual_events.add_argument("--sample-interval", type=float)
+    index_visual_events.add_argument("--roi", type=_parse_normalized_box)
+    index_visual_events.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+    )
+    index_visual_events.add_argument("--analysis-width", type=int)
+    index_visual_events.add_argument("--tile-columns", type=int)
+    index_visual_events.add_argument("--tile-rows", type=int)
+    index_visual_events.add_argument("--tile-change-threshold", type=float)
+    index_visual_events.add_argument("--minimum-changed-tiles", type=int)
+    index_visual_events.add_argument("--global-change-ratio", type=float)
 
     render_tracks = subparsers.add_parser(
         "render-tracks",
@@ -335,6 +359,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             if args.require_pass and not report["summary"]["gates_passed"]:
                 return 1
+            return 0
+
+        if args.command == "index-visual-events":
+            profile = load_profile(args.profile) if args.profile is not None else None
+            analysis_options = merge_analysis_options(profile, roi=args.roi)
+            visual_options = merge_visual_event_options(
+                profile,
+                sample_interval_seconds=args.sample_interval,
+                analysis_width=args.analysis_width,
+                tile_columns=args.tile_columns,
+                tile_rows=args.tile_rows,
+                tile_change_threshold=args.tile_change_threshold,
+                minimum_changed_tiles=args.minimum_changed_tiles,
+                global_change_ratio=args.global_change_ratio,
+                exclude_regions=tuple(args.exclude_roi),
+            )
+            work_dir = args.work_dir or Path("data/work") / f"{args.path.stem}-visual-events"
+            payload = index_video_visual_events(
+                args.path,
+                work_dir,
+                profile_name=profile.name if profile is not None else None,
+                roi=analysis_options.roi,
+                options=visual_options,
+            )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
 
         if args.command in {"index-video", "localize-video"}:

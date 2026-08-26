@@ -24,3 +24,17 @@ analysis:
 scene_detection:
   hash_size: 16
   hamming_threshold: 18
+
+visual_events:
+  sample_interval_seconds: 0.2
+  analysis_width: 384
+  tile_columns: 12
+  tile_rows: 8
+  tile_change_threshold: 0.02
+  minimum_changed_tiles: 1
+  global_change_ratio: 0.35
+  exclude_regions:
+    - x: 0.84
+      y: 0.78
+      width: 0.13
+      height: 0.22

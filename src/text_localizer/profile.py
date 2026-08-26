@@ -24,10 +24,40 @@ class SceneDetectionOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class VisualEventOptions:
+    sample_interval_seconds: float = 0.2
+    analysis_width: int = 384
+    tile_columns: int = 12
+    tile_rows: int = 8
+    tile_change_threshold: float = 0.02
+    minimum_changed_tiles: int = 1
+    global_change_ratio: float = 0.35
+    exclude_regions: tuple[NormalizedBox, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.sample_interval_seconds <= 0.0:
+            raise ValueError("Visual-event sample interval must be positive.")
+        if not 64 <= self.analysis_width <= 2048:
+            raise ValueError("Visual-event analysis width must be between 64 and 2048.")
+        if not 2 <= self.tile_columns <= 64 or not 2 <= self.tile_rows <= 64:
+            raise ValueError("Visual-event tile dimensions must be between 2 and 64.")
+        tile_count = self.tile_columns * self.tile_rows
+        if not 1 <= self.minimum_changed_tiles <= tile_count:
+            raise ValueError(
+                f"Visual-event minimum changed tiles must be between 1 and {tile_count}."
+            )
+        if not 0.0 < self.tile_change_threshold <= 1.0:
+            raise ValueError("Visual-event tile change threshold must be between 0 and 1.")
+        if not 0.0 <= self.global_change_ratio <= 1.0:
+            raise ValueError("Visual-event global change ratio must be between 0 and 1.")
+
+
+@dataclass(frozen=True, slots=True)
 class LocalizationProfile:
     name: str
     analysis: AnalysisOptions
     scene_detection: SceneDetectionOptions
+    visual_events: VisualEventOptions
     glossary_path: Path | None
     source_path: Path
 
@@ -47,9 +77,13 @@ def load_profile(path: Path) -> LocalizationProfile:
 
     analysis_payload = _mapping(payload.get("analysis", {}), "analysis")
     scene_payload = _mapping(payload.get("scene_detection", {}), "scene_detection")
+    visual_payload = _mapping(payload.get("visual_events", {}), "visual_events")
     exclude_payload = analysis_payload.get("exclude_regions", [])
     if not isinstance(exclude_payload, list):
         raise ValueError("analysis.exclude_regions must be a list.")
+    visual_exclude_payload = visual_payload.get("exclude_regions", [])
+    if not isinstance(visual_exclude_payload, list):
+        raise ValueError("visual_events.exclude_regions must be a list.")
 
     glossary_value = payload.get("glossary")
     if glossary_value is not None and not isinstance(glossary_value, str):
@@ -82,10 +116,45 @@ def load_profile(path: Path) -> LocalizationProfile:
             "scene_detection.hamming_threshold",
         ),
     )
+    visual_events = VisualEventOptions(
+        sample_interval_seconds=_number(
+            visual_payload.get("sample_interval_seconds", 0.2),
+            "visual_events.sample_interval_seconds",
+        ),
+        analysis_width=_integer(
+            visual_payload.get("analysis_width", 384),
+            "visual_events.analysis_width",
+        ),
+        tile_columns=_integer(
+            visual_payload.get("tile_columns", 12),
+            "visual_events.tile_columns",
+        ),
+        tile_rows=_integer(
+            visual_payload.get("tile_rows", 8),
+            "visual_events.tile_rows",
+        ),
+        tile_change_threshold=_number(
+            visual_payload.get("tile_change_threshold", 0.02),
+            "visual_events.tile_change_threshold",
+        ),
+        minimum_changed_tiles=_integer(
+            visual_payload.get("minimum_changed_tiles", 1),
+            "visual_events.minimum_changed_tiles",
+        ),
+        global_change_ratio=_number(
+            visual_payload.get("global_change_ratio", 0.35),
+            "visual_events.global_change_ratio",
+        ),
+        exclude_regions=tuple(
+            _box(item, f"visual_events.exclude_regions[{index}]")
+            for index, item in enumerate(visual_exclude_payload)
+        ),
+    )
     return LocalizationProfile(
         name=name.strip(),
         analysis=analysis,
         scene_detection=scene_detection,
+        visual_events=visual_events,
         glossary_path=glossary_path,
         source_path=path.resolve(),
     )
@@ -113,6 +182,45 @@ def merge_analysis_options(
             if translation_batch_size is not None
             else base.translation_batch_size
         ),
+    )
+
+
+def merge_visual_event_options(
+    profile: LocalizationProfile | None,
+    *,
+    sample_interval_seconds: float | None = None,
+    analysis_width: int | None = None,
+    tile_columns: int | None = None,
+    tile_rows: int | None = None,
+    tile_change_threshold: float | None = None,
+    minimum_changed_tiles: int | None = None,
+    global_change_ratio: float | None = None,
+    exclude_regions: tuple[NormalizedBox, ...] = (),
+) -> VisualEventOptions:
+    base = profile.visual_events if profile is not None else VisualEventOptions()
+    return VisualEventOptions(
+        sample_interval_seconds=(
+            sample_interval_seconds
+            if sample_interval_seconds is not None
+            else base.sample_interval_seconds
+        ),
+        analysis_width=analysis_width if analysis_width is not None else base.analysis_width,
+        tile_columns=tile_columns if tile_columns is not None else base.tile_columns,
+        tile_rows=tile_rows if tile_rows is not None else base.tile_rows,
+        tile_change_threshold=(
+            tile_change_threshold
+            if tile_change_threshold is not None
+            else base.tile_change_threshold
+        ),
+        minimum_changed_tiles=(
+            minimum_changed_tiles
+            if minimum_changed_tiles is not None
+            else base.minimum_changed_tiles
+        ),
+        global_change_ratio=(
+            global_change_ratio if global_change_ratio is not None else base.global_change_ratio
+        ),
+        exclude_regions=base.exclude_regions + exclude_regions,
     )
 
 

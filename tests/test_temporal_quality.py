@@ -164,6 +164,70 @@ def test_temporal_quality_exposes_missing_keyframe_and_flicker() -> None:
     assert report["gate_results"]["flicker_events"] is False
 
 
+def test_temporal_quality_absence_annotation_detects_leaked_overlay() -> None:
+    payload = _benchmark(3.0)
+    payload["annotations"].append(
+        {
+            "id": "company-logo-absent",
+            "label": "Company logo does not leak into the lecture page",
+            "start_seconds": 1.0,
+            "end_seconds": 3.0,
+            "expect_visible": False,
+            "evaluate_boundaries": False,
+            "match": {
+                "field": "source_text",
+                "mode": "contains",
+                "patterns": ["주식회사"],
+            },
+        }
+    )
+    company = _region()
+    company["source_text"] = "주식회사"
+    company["translated_text"] = "株式会社"
+    manifest = _manifest([[_region()], [_region(), company], [_region(), company]])
+
+    report = evaluate_temporal_quality(manifest, parse_temporal_benchmark(payload))
+
+    absence = report["annotations"][1]
+    assert absence["expect_visible"] is False
+    assert absence["observed_coverage_ratio"] == 1.0
+    assert absence["coverage_ratio"] == 0.0
+    assert absence["coverage_passed"] is False
+    assert absence["flicker_event_count"] == 1
+    assert report["summary"]["gates_passed"] is False
+
+
+def test_temporal_quality_absence_annotation_passes_without_matching_overlay() -> None:
+    payload = _benchmark(3.0)
+    payload["annotations"].append(
+        {
+            "id": "company-logo-absent",
+            "label": "Company logo does not leak into the lecture page",
+            "start_seconds": 1.0,
+            "end_seconds": 3.0,
+            "expect_visible": False,
+            "evaluate_boundaries": False,
+            "match": {
+                "field": "source_text",
+                "mode": "contains",
+                "patterns": ["주식회사"],
+            },
+        }
+    )
+
+    report = evaluate_temporal_quality(
+        _manifest([[_region()], [_region()], [_region()]]),
+        parse_temporal_benchmark(payload),
+    )
+
+    absence = report["annotations"][1]
+    assert absence["observed_coverage_ratio"] == 0.0
+    assert absence["coverage_ratio"] == 1.0
+    assert absence["coverage_passed"] is True
+    assert absence["flicker_event_count"] == 0
+    assert report["summary"]["gates_passed"] is True
+
+
 def test_temporal_quality_exposes_spatial_drift_without_boundary_samples() -> None:
     manifest = _manifest([[_region()]])
     expected_box = {"x": 0.7, "y": 0.7, "width": 0.2, "height": 0.1}
@@ -217,6 +281,7 @@ def test_checked_in_zero_video_benchmark_is_valid() -> None:
     payload = json.loads(benchmark_path.read_text(encoding="utf-8"))
 
     assert benchmark.name == "0.mp4 temporal overlay baseline"
-    assert payload["ground_truth"]["revision"] == 2
-    assert len(benchmark.annotations) == 3
-    assert sum(len(item.keyframes) for item in benchmark.annotations) == 12
+    assert payload["ground_truth"]["revision"] == 3
+    assert len(benchmark.annotations) == 6
+    assert sum(len(item.keyframes) for item in benchmark.annotations) == 18
+    assert sum(not item.expect_visible for item in benchmark.annotations) == 1

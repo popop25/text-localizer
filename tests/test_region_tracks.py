@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from PIL import Image
 
 from text_localizer.domain import NormalizedBox, Point
@@ -115,6 +116,43 @@ def test_select_tracking_frames_uses_pre_changed_and_post_frames(tmp_path: Path)
     assert all(item.event_start_seconds == 0.4 for item in selected)
 
 
+def test_select_tracking_frames_supports_disjoint_include_windows(tmp_path: Path) -> None:
+    paths = [tmp_path / f"frame-{index}.png" for index in range(6)]
+    visual_manifest = _visual_manifest(paths)
+
+    excluded = select_tracking_frames(
+        visual_manifest,
+        RegionTrackingOptions(include_windows=((2.0, 3.0),)),
+    )
+    included = select_tracking_frames(
+        visual_manifest,
+        RegionTrackingOptions(include_windows=((0.3, 0.5), (2.0, 3.0))),
+    )
+
+    assert excluded == ()
+    assert [item.frame_index for item in included] == [1, 3, 4, 5]
+
+
+def test_region_tracking_options_reject_windows_with_contiguous_bounds() -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        RegionTrackingOptions(start_seconds=1.0, include_windows=((2.0, 3.0),))
+
+
+@pytest.mark.parametrize(
+    "windows",
+    [
+        ((2.0, 3.0), (1.0, 1.5)),
+        ((1.0, 2.0), (1.5, 3.0)),
+        ((1.0, 2.0), (2.0, 3.0)),
+    ],
+)
+def test_region_tracking_options_reject_unordered_or_overlapping_windows(
+    windows: tuple[tuple[float, float], ...],
+) -> None:
+    with pytest.raises(ValueError, match="ordered and non-overlapping"):
+        RegionTrackingOptions(include_windows=windows)
+
+
 def test_build_region_tracks_merges_ocr_variants_and_injects_event_keyframes(
     tmp_path: Path,
 ) -> None:
@@ -164,6 +202,176 @@ def test_build_region_tracks_merges_ocr_variants_and_injects_event_keyframes(
         "linear",
         "hold",
     ]
+    assert track["region"]["source_text"] == "[실습] LangChain 기초"
+    assert track["text_consensus"]["observed_consensus_text"] == "LangChain 기초"
+    assert track["text_consensus"]["observation_count"] == 4
+    assert result["region_tracking"]["text_consensus_track_count"] == 1
+
+
+def test_build_region_tracks_selects_consensus_source_and_matching_translation(
+    tmp_path: Path,
+) -> None:
+    manifest = _base_manifest(tmp_path / "video.mp4")
+    correct = _region("Rest API 사용 경험 및 LLM 기본 개념 이해", 0.5)
+    correct["translated_text"] = "Rest API の使用経験と LLM の基本概念の理解"
+    correct["ocr_confidence"] = 0.88
+    corrupt = _region("YReSt AP 사용 경험 및 LLM 기본 개념 이해", 0.4)
+    corrupt["translated_text"] = "YReSt AP を使用する経験"
+    corrupt["ocr_confidence"] = 0.99
+    manifest["tracks"][0]["regions"] = [correct]
+    manifest["tracks"][1]["regions"] = [corrupt]
+    observations = [
+        {
+            "event_id": "visual-event-0001",
+            "frame_index": index,
+            "timestamp_seconds": timestamp,
+            "phase": phase,
+            "regions": [
+                {
+                    "source_text": "Rest API 사용 경험 및 LLM 기본 개념 이해",
+                    "ocr_confidence": 0.9,
+                    "bbox": {"x": 0.25, "y": y, "width": 0.2, "height": 0.04},
+                }
+            ],
+        }
+        for index, timestamp, phase, y in (
+            (9, 1.8, "pre", 0.5),
+            (10, 2.0, "changed", 0.48),
+            (11, 2.2, "post", 0.46),
+        )
+    ]
+
+    result = build_region_track_manifest(
+        manifest,
+        observations,
+        visual_event_manifest_path=tmp_path / "visual-events.json",
+        options=RegionTrackingOptions(),
+    )
+
+    track = result["region_tracks"][0]
+    assert track["region"]["source_text"].startswith("Rest API")
+    assert track["region"]["translation_source_text"].startswith("Rest API")
+    assert track["region"]["translated_text"] == correct["translated_text"]
+    assert track["region"]["needs_review"] is False
+    assert track["text_consensus"]["unique_text_count"] == 2
+    assert result["region_tracking"]["text_consensus_changed_track_count"] == 1
+
+
+def test_build_region_tracks_anchors_repeated_ocr_identifier_error_to_translation_source(
+    tmp_path: Path,
+) -> None:
+    manifest = _base_manifest(tmp_path / "video.mp4")
+    correct = _region("Azure OpenAI & LangChain 실전", 0.5)
+    correct["translated_text"] = "Azure OpenAI & LangChain 実践"
+    manifest["tracks"][0]["regions"] = [correct]
+    manifest["tracks"] = manifest["tracks"][:1]
+    manifest["tracks"][0]["end_seconds"] = 2.0
+    manifest["track_count"] = 1
+    manifest["video"]["duration_seconds"] = 2.0
+    observations = [
+        {
+            "event_id": "visual-event-0001",
+            "frame_index": index,
+            "timestamp_seconds": timestamp,
+            "phase": phase,
+            "regions": [
+                {
+                    "source_text": "Azure OpenAl & LangChain 실전",
+                    "ocr_confidence": 0.98,
+                    "bbox": {"x": 0.25, "y": 0.5, "width": 0.2, "height": 0.04},
+                }
+            ],
+        }
+        for index, timestamp, phase in (
+            (9, 0.8, "pre"),
+            (10, 1.0, "changed"),
+            (11, 1.2, "post"),
+        )
+    ]
+
+    result = build_region_track_manifest(
+        manifest,
+        observations,
+        visual_event_manifest_path=tmp_path / "visual-events.json",
+        options=RegionTrackingOptions(),
+    )
+
+    track = result["region_tracks"][0]
+    assert track["text_consensus"]["observed_consensus_text"] == ("Azure OpenAl & LangChain 실전")
+    assert track["region"]["source_text"] == "Azure OpenAI & LangChain 실전"
+    assert track["region"]["translation_source_text"] == "Azure OpenAI & LangChain 실전"
+    assert track["region"]["translated_text"] == "Azure OpenAI & LangChain 実践"
+
+
+def test_build_region_tracks_ends_after_trailing_event_misses(
+    tmp_path: Path,
+) -> None:
+    manifest = _base_manifest(tmp_path / "video.mp4")
+    manifest["video"]["duration_seconds"] = 3.0
+    manifest["track_count"] = 3
+    manifest["tracks"] = [
+        {
+            "track_id": "scene-0001",
+            "start_seconds": 0.0,
+            "end_seconds": 1.0,
+            "regions": [_region("주식회사", 0.5)],
+        },
+        {
+            "track_id": "scene-0002",
+            "start_seconds": 1.0,
+            "end_seconds": 2.0,
+            "regions": [_region("주식회사", 0.45)],
+        },
+        {
+            "track_id": "scene-0003",
+            "start_seconds": 2.0,
+            "end_seconds": 3.0,
+            "regions": [_region("주식회사", 0.4)],
+        },
+    ]
+    observations = [
+        {
+            "event_id": "visual-event-0001",
+            "frame_index": 4,
+            "timestamp_seconds": 0.8,
+            "phase": "pre",
+            "regions": [
+                {
+                    "source_text": "주식회사",
+                    "ocr_confidence": 0.95,
+                    "bbox": {"x": 0.25, "y": 0.5, "width": 0.2, "height": 0.04},
+                }
+            ],
+        },
+        {
+            "event_id": "visual-event-0001",
+            "frame_index": 5,
+            "timestamp_seconds": 1.0,
+            "phase": "changed",
+            "regions": [],
+        },
+        {
+            "event_id": "visual-event-0001",
+            "frame_index": 6,
+            "timestamp_seconds": 1.2,
+            "phase": "post",
+            "regions": [],
+        },
+    ]
+
+    result = build_region_track_manifest(
+        manifest,
+        observations,
+        visual_event_manifest_path=tmp_path / "visual-events.json",
+        options=RegionTrackingOptions(),
+    )
+
+    assert result["region_track_count"] == 1
+    track = result["region_tracks"][0]
+    assert track["start_seconds"] == 0.0
+    assert track["end_seconds"] == 1.0
+    assert [item["timestamp_seconds"] for item in track["keyframes"]] == [0.0, 0.8]
+    assert result["region_tracking"]["visibility_adjusted_track_count"] == 1
 
 
 class FakeOcrProvider:

@@ -58,6 +58,7 @@ class TemporalAnnotation:
     text_match: TextMatch
     keyframes: tuple[ExpectedKeyframe, ...]
     evaluate_boundaries: bool
+    expect_visible: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,9 +290,16 @@ def _parse_annotation(raw: Any, index: int, duration: float) -> TemporalAnnotati
         _nonblank_string(item, f"annotations[{index}].match.patterns") for item in raw_patterns
     )
 
-    raw_keyframes = values.get("keyframes")
-    if not isinstance(raw_keyframes, list) or not raw_keyframes:
-        raise ValueError(f"Annotation {annotation_id} requires at least one keyframe.")
+    expect_visible = values.get("expect_visible", True)
+    if not isinstance(expect_visible, bool):
+        raise ValueError(f"Annotation {annotation_id} expect_visible must be a boolean.")
+    raw_keyframes = values.get("keyframes", [])
+    if not isinstance(raw_keyframes, list):
+        raise ValueError(f"Annotation {annotation_id} keyframes must be a list.")
+    if expect_visible and not raw_keyframes:
+        raise ValueError(f"Visible annotation {annotation_id} requires at least one keyframe.")
+    if not expect_visible and raw_keyframes:
+        raise ValueError(f"Absent annotation {annotation_id} cannot declare keyframes.")
     keyframes: list[ExpectedKeyframe] = []
     previous_timestamp: float | None = None
     for keyframe_index, raw_keyframe in enumerate(raw_keyframes):
@@ -321,6 +329,8 @@ def _parse_annotation(raw: Any, index: int, duration: float) -> TemporalAnnotati
     evaluate_boundaries = values.get("evaluate_boundaries", True)
     if not isinstance(evaluate_boundaries, bool):
         raise ValueError(f"Annotation {annotation_id} evaluate_boundaries must be a boolean.")
+    if not expect_visible and evaluate_boundaries:
+        raise ValueError(f"Absent annotation {annotation_id} cannot evaluate boundaries.")
     return TemporalAnnotation(
         annotation_id=annotation_id,
         label=label,
@@ -329,6 +339,7 @@ def _parse_annotation(raw: Any, index: int, duration: float) -> TemporalAnnotati
         text_match=TextMatch(field=field, mode=mode, patterns=patterns),
         keyframes=tuple(keyframes),
         evaluate_boundaries=evaluate_boundaries,
+        expect_visible=expect_visible,
     )
 
 
@@ -357,12 +368,17 @@ def _evaluate_annotation(
     ]
     merged_clipped = _merge_intervals(clipped_intervals, gates.flicker_tolerance_seconds)
     covered_seconds = sum(end - start for start, end in merged_clipped)
-    coverage_ratio = covered_seconds / (annotation.end_seconds - annotation.start_seconds)
-    flicker_count = max(0, len(merged_clipped) - 1)
+    observed_coverage_ratio = covered_seconds / (annotation.end_seconds - annotation.start_seconds)
+    coverage_ratio = (
+        observed_coverage_ratio if annotation.expect_visible else 1.0 - observed_coverage_ratio
+    )
+    flicker_count = (
+        max(0, len(merged_clipped) - 1) if annotation.expect_visible else len(merged_clipped)
+    )
 
     onset_error_ms: float | None = None
     offset_error_ms: float | None = None
-    if annotation.evaluate_boundaries:
+    if annotation.expect_visible and annotation.evaluate_boundaries:
         raw_intervals = _merge_intervals(
             [(item.start_seconds, item.end_seconds) for item in candidates],
             gates.flicker_tolerance_seconds,
@@ -422,6 +438,8 @@ def _evaluate_annotation(
         "label": annotation.label,
         "start_seconds": annotation.start_seconds,
         "end_seconds": annotation.end_seconds,
+        "expect_visible": annotation.expect_visible,
+        "observed_coverage_ratio": observed_coverage_ratio,
         "coverage_ratio": coverage_ratio,
         "coverage_passed": coverage_ratio >= gates.minimum_annotation_coverage_ratio,
         "onset_error_ms": onset_error_ms,

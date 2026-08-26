@@ -28,6 +28,8 @@ from text_localizer.video_viewer import write_video_viewer
 
 _COMPACT_TEXT_RE = re.compile(r"[^0-9a-z\u3040-\u30ff\u3400-\u9fff\uac00-\ud7a3]+")
 _TIME_TOLERANCE_SECONDS = 1e-6
+_LOW_CONSENSUS_AGREEMENT = 0.78
+_MIN_TRAILING_MISSING_OBSERVATIONS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +40,7 @@ class RegionTrackingOptions:
     tile_padding: int = 0
     start_seconds: float | None = None
     end_seconds: float | None = None
+    include_windows: tuple[tuple[float, float], ...] = ()
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.minimum_event_ratio <= 1.0:
@@ -58,6 +61,21 @@ class RegionTrackingOptions:
             and self.end_seconds <= self.start_seconds
         ):
             raise ValueError("Region-track end time must be later than its start time.")
+        if self.include_windows and (
+            self.start_seconds is not None or self.end_seconds is not None
+        ):
+            raise ValueError(
+                "Region-track include windows cannot be combined with start/end bounds."
+            )
+        previous_end: float | None = None
+        for start, end in self.include_windows:
+            if start < 0.0 or end <= start:
+                raise ValueError("Region-track include windows require 0 <= start < end.")
+            if previous_end is not None and start <= previous_end:
+                raise ValueError(
+                    "Region-track include windows must be ordered and non-overlapping."
+                )
+            previous_end = end
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +193,11 @@ def select_tracking_frames(
             continue
         if options.end_seconds is not None and start > options.end_seconds:
             continue
+        if options.include_windows and not any(
+            end >= window_start and start <= window_end
+            for window_start, window_end in options.include_windows
+        ):
+            continue
 
         event_id = str(event["event_id"])
         first_index = int(event["first_frame_index"])
@@ -227,15 +250,21 @@ def build_region_track_manifest(
         observations,
         options.minimum_text_similarity,
     )
+    consensus_metrics = _finalize_track_text_consensus(
+        region_tracks,
+        options.minimum_text_similarity,
+    )
     result = deepcopy(base_manifest)
     result["schema_version"] = 2
     result["region_track_count"] = len(region_tracks)
     result["region_tracks"] = region_tracks
     result["region_tracking"] = {
         "schema_version": 1,
-        "algorithm": "event-ocr-keyframes-v1",
+        "algorithm": "event-ocr-keyframes-v2",
         "interpolation": "per-keyframe",
-        "translation_policy": "reuse-approved-v1-regions",
+        "translation_policy": "reuse-consensus-nearest-v1-region",
+        "text_consensus": "confidence-weighted-medoid-v1-anchor",
+        "visibility_policy": "event-trailing-miss-v1",
         "visual_event_manifest": str(visual_event_manifest_path.resolve()),
         "options": {
             "minimum_event_ratio": options.minimum_event_ratio,
@@ -244,8 +273,13 @@ def build_region_track_manifest(
             "tile_padding": options.tile_padding,
             "start_seconds": options.start_seconds,
             "end_seconds": options.end_seconds,
+            "include_windows": [
+                {"start_seconds": start, "end_seconds": end}
+                for start, end in options.include_windows
+            ],
         },
         **injection_metrics,
+        **consensus_metrics,
     }
     metrics = cast(dict[str, Any], result["metrics"])
     metrics["needs_review_count"] = sum(
@@ -286,10 +320,15 @@ def _compile_base_region_tracks(
                     "end_seconds": end,
                     "region": deepcopy(region),
                     "keyframes": [],
+                    "_region_candidates": [deepcopy(region)],
                 }
                 next_id += 1
                 compiled.append(matched)
             else:
+                if _is_renderable_region(region):
+                    cast(list[dict[str, Any]], matched["_region_candidates"]).append(
+                        deepcopy(region)
+                    )
                 matched["end_seconds"] = end
                 if _is_renderable_region(region):
                     _prefer_region_payload(cast(dict[str, Any], matched["region"]), region)
@@ -315,6 +354,7 @@ def _inject_event_keyframes(
     matched_observations = 0
     unmatched_observations = 0
     affected_ids: set[str] = set()
+    visibility_adjusted_ids: set[str] = set()
     by_event: dict[str, list[dict[str, Any]]] = {}
     for observation in observations:
         by_event.setdefault(str(observation["event_id"]), []).append(observation)
@@ -324,6 +364,7 @@ def _inject_event_keyframes(
         event_start = float(ordered[0]["timestamp_seconds"])
         event_end = float(ordered[-1]["timestamp_seconds"])
         additions: dict[str, list[dict[str, Any]]] = {}
+        visibility_samples: dict[str, list[tuple[float, bool, str]]] = {}
         for observation_index, observation in enumerate(ordered):
             timestamp = float(observation["timestamp_seconds"])
             candidates = [
@@ -339,7 +380,19 @@ def _inject_event_keyframes(
                 regions,
                 candidates,
                 minimum_text_similarity,
+                timestamp,
             )
+            matched_track_ids = {str(track["region_track_id"]) for _index, track in matches}
+            for track in candidates:
+                track_id = str(track["region_track_id"])
+                if _observation_covers_track(observation, track, timestamp):
+                    visibility_samples.setdefault(track_id, []).append(
+                        (
+                            timestamp,
+                            track_id in matched_track_ids,
+                            str(observation["phase"]),
+                        )
+                    )
             matched_observations += len(matches)
             unmatched_observations += len(regions) - len(matches)
             for region_index, track in matches:
@@ -397,6 +450,26 @@ def _inject_event_keyframes(
                 )
             keyframes.sort(key=lambda item: float(item["timestamp_seconds"]))
 
+        for track in region_tracks:
+            track_id = str(track["region_track_id"])
+            new_end = _trailing_visibility_end(
+                track,
+                visibility_samples.get(track_id, []),
+            )
+            if new_end is None:
+                continue
+            track["end_seconds"] = new_end
+            keyframes = cast(list[dict[str, Any]], track["keyframes"])
+            keyframes[:] = [
+                item
+                for item in keyframes
+                if float(item["timestamp_seconds"]) < new_end - _TIME_TOLERANCE_SECONDS
+            ]
+            if not keyframes:
+                raise ValueError(f"Visibility adjustment removed every keyframe from {track_id}.")
+            keyframes[-1]["interpolation"] = "hold"
+            visibility_adjusted_ids.add(track_id)
+
     for track in region_tracks:
         cast(list[dict[str, Any]], track["keyframes"]).sort(
             key=lambda item: float(item["timestamp_seconds"])
@@ -406,7 +479,45 @@ def _inject_event_keyframes(
         "matched_ocr_region_count": matched_observations,
         "unmatched_ocr_region_count": unmatched_observations,
         "affected_region_track_count": len(affected_ids),
+        "visibility_adjusted_track_count": len(visibility_adjusted_ids),
     }
+
+
+def _observation_covers_track(
+    observation: dict[str, Any],
+    track: dict[str, Any],
+    timestamp: float,
+) -> bool:
+    raw_roi = observation.get("roi")
+    if not isinstance(raw_roi, dict):
+        return True
+    track_box = _nearest_keyframe_box(track, timestamp)
+    roi = _box_mapping(raw_roi)
+    return _box_coverage_ratio(track_box, roi) >= 0.5
+
+
+def _trailing_visibility_end(
+    track: dict[str, Any],
+    samples: list[tuple[float, bool, str]],
+) -> float | None:
+    matched_indices = [
+        index for index, (_timestamp, matched, _phase) in enumerate(samples) if matched
+    ]
+    if not matched_indices:
+        return None
+    trailing = samples[matched_indices[-1] + 1 :]
+    if len(trailing) < _MIN_TRAILING_MISSING_OBSERVATIONS:
+        return None
+    if any(matched for _timestamp, matched, _phase in trailing):
+        return None
+    if trailing[-1][2] != "post":
+        return None
+    candidate = trailing[0][0]
+    if candidate <= float(track["start_seconds"]) + _TIME_TOLERANCE_SECONDS:
+        return None
+    if candidate >= float(track["end_seconds"]) - _TIME_TOLERANCE_SECONDS:
+        return None
+    return candidate
 
 
 def _observe_tracking_frame(
@@ -560,7 +671,7 @@ def _match_regions_to_tracks(
                 continue
             text_score = _text_similarity(
                 str(region.get("source_text", "")),
-                str(cast(dict[str, Any], track["region"]).get("source_text", "")),
+                _last_keyframe_source_text(track),
             )
             if text_score < minimum_text_similarity:
                 continue
@@ -576,19 +687,20 @@ def _match_observations_to_tracks(
     regions: list[dict[str, Any]],
     tracks: list[dict[str, Any]],
     minimum_text_similarity: float,
+    timestamp: float,
 ) -> list[tuple[int, dict[str, Any]]]:
     scored: list[tuple[float, int, int]] = []
     for region_index, region in enumerate(regions):
         for track_index, track in enumerate(tracks):
             text_score = _text_similarity(
                 str(region.get("source_text", "")),
-                str(cast(dict[str, Any], track["region"]).get("source_text", "")),
+                _nearest_keyframe_source_text(track, timestamp),
             )
             if text_score < minimum_text_similarity:
                 continue
             spatial_score = _spatial_similarity(
                 _box_mapping(region["bbox"]),
-                _nearest_keyframe_box(track, float(track.get("start_seconds", 0.0))),
+                _nearest_keyframe_box(track, timestamp),
             )
             scored.append((text_score * 0.9 + spatial_score * 0.1, region_index, track_index))
     return _greedy_matches(scored, regions, tracks)
@@ -728,6 +840,169 @@ def _prefer_region_payload(current: dict[str, Any], candidate: dict[str, Any]) -
         current.update(deepcopy(candidate))
 
 
+def _finalize_track_text_consensus(
+    region_tracks: list[dict[str, Any]],
+    minimum_text_similarity: float,
+) -> dict[str, int]:
+    changed_track_count = 0
+    low_agreement_count = 0
+    translation_mismatch_count = 0
+    for track in region_tracks:
+        raw_candidates = track.pop("_region_candidates", None)
+        if not isinstance(raw_candidates, list) or not raw_candidates:
+            raise ValueError(
+                f"Region track {track['region_track_id']} has no translation candidates."
+            )
+        candidates = [
+            cast(dict[str, Any], item)
+            for item in raw_candidates
+            if isinstance(item, dict) and _is_renderable_region(cast(dict[str, Any], item))
+        ]
+        if not candidates:
+            raise ValueError(
+                f"Region track {track['region_track_id']} has no renderable translation candidate."
+            )
+
+        keyframes = cast(list[dict[str, Any]], track["keyframes"])
+        selected_text, selected_confidence, agreement_ratio, exact_agreement_ratio = (
+            _select_consensus_observation(keyframes)
+        )
+        legacy_region = cast(dict[str, Any], track["region"])
+        legacy_source_text = str(legacy_region.get("source_text", ""))
+        best_candidate = max(
+            candidates,
+            key=lambda candidate: (
+                _text_similarity(selected_text, str(candidate.get("source_text", ""))),
+                int(candidate.get("needs_review") is not True),
+                float(candidate.get("ocr_confidence", 0.0)),
+            ),
+        )
+        region = deepcopy(best_candidate)
+        translation_source_text = str(region.get("source_text", ""))
+        translation_source_similarity = _text_similarity(
+            selected_text,
+            translation_source_text,
+        )
+        raw_flags = region.get("translation_quality_flags", [])
+        flags = [str(item) for item in raw_flags] if isinstance(raw_flags, list) else []
+        needs_review = region.get("needs_review") is True
+        if agreement_ratio < _LOW_CONSENSUS_AGREEMENT:
+            if "ocr_consensus_low_agreement" not in flags:
+                flags.append("ocr_consensus_low_agreement")
+            needs_review = True
+            low_agreement_count += 1
+        if translation_source_similarity < minimum_text_similarity:
+            if "ocr_consensus_translation_mismatch" not in flags:
+                flags.append("ocr_consensus_translation_mismatch")
+            needs_review = True
+            translation_mismatch_count += 1
+
+        # Event observations choose the nearest already-translated v1 candidate, but the
+        # candidate's source stays canonical. Repeated OCR mistakes are correlated (for
+        # example, every transition frame can read ``OpenAI`` as ``OpenAl``), so allowing
+        # the raw medoid to replace a compatible translated source would regress both
+        # terminology and source/target alignment.
+        canonical_source_text = translation_source_text
+        region["source_text"] = canonical_source_text
+        region["translation_source_text"] = translation_source_text
+        region["translation_quality_flags"] = flags
+        region["needs_review"] = needs_review
+        track["region"] = region
+        track["text_consensus"] = {
+            "schema_version": 1,
+            "algorithm": "confidence-weighted-medoid-v1-anchor",
+            "observation_count": len(keyframes),
+            "unique_text_count": len(
+                {_compact_text(str(item.get("source_text", ""))) for item in keyframes}
+            ),
+            "selected_source_text": canonical_source_text,
+            "observed_consensus_text": selected_text,
+            "selected_ocr_confidence": selected_confidence,
+            "agreement_ratio": agreement_ratio,
+            "exact_agreement_ratio": exact_agreement_ratio,
+            "translation_source_text": translation_source_text,
+            "translation_source_similarity": translation_source_similarity,
+        }
+        if _compact_text(legacy_source_text) != _compact_text(canonical_source_text):
+            changed_track_count += 1
+
+    return {
+        "text_consensus_track_count": len(region_tracks),
+        "text_consensus_changed_track_count": changed_track_count,
+        "text_consensus_low_agreement_count": low_agreement_count,
+        "text_consensus_translation_mismatch_count": translation_mismatch_count,
+    }
+
+
+def _select_consensus_observation(
+    keyframes: list[dict[str, Any]],
+) -> tuple[str, float, float, float]:
+    observations = [
+        (
+            str(item.get("source_text", "")).strip(),
+            max(0.05, min(1.0, float(item.get("ocr_confidence", 0.0)))),
+        )
+        for item in keyframes
+        if str(item.get("source_text", "")).strip()
+    ]
+    if not observations:
+        raise ValueError("Region track text consensus requires at least one OCR observation.")
+    total_weight = sum(weight for _text, weight in observations)
+    scored: list[tuple[float, float, float, int, str, float]] = []
+    for candidate_text, candidate_confidence in observations:
+        agreement = (
+            sum(
+                weight * _text_similarity(candidate_text, observed_text)
+                for observed_text, weight in observations
+            )
+            / total_weight
+        )
+        exact_agreement = (
+            sum(
+                weight
+                for observed_text, weight in observations
+                if _compact_text(candidate_text) == _compact_text(observed_text)
+            )
+            / total_weight
+        )
+        readability = _consensus_readability(candidate_text)
+        score = agreement + exact_agreement * 0.08 + candidate_confidence * 0.02
+        scored.append(
+            (
+                score,
+                readability,
+                candidate_confidence,
+                len(candidate_text),
+                candidate_text,
+                exact_agreement,
+            )
+        )
+    _score, _readability, confidence, _length, selected, exact_agreement = max(scored)
+    agreement = (
+        sum(
+            weight * _text_similarity(selected, observed_text)
+            for observed_text, weight in observations
+        )
+        / total_weight
+    )
+    return selected, confidence, agreement, exact_agreement
+
+
+def _consensus_readability(value: str) -> float:
+    stripped = value.strip()
+    if not stripped:
+        return 0.0
+    score = 1.0 + min(stripped.count(" "), 8) * 0.01
+    if stripped[0] in '^<>"»':
+        score -= 0.2
+    for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+        if stripped.count(opening) != stripped.count(closing):
+            score -= 0.15
+    if stripped.count('"') % 2:
+        score -= 0.15
+    return score
+
+
 def _is_renderable_region(region: dict[str, Any]) -> bool:
     return (
         region.get("action") == "translate"
@@ -773,15 +1048,36 @@ def _spatial_similarity(left: dict[str, float], right: dict[str, float]) -> floa
     return max(0.0, 1.0 - distance / 0.5)
 
 
+def _box_coverage_ratio(box: dict[str, float], container: dict[str, float]) -> float:
+    left = max(box["x"], container["x"])
+    top = max(box["y"], container["y"])
+    right = min(box["x"] + box["width"], container["x"] + container["width"])
+    bottom = min(box["y"] + box["height"], container["y"] + container["height"])
+    intersection = max(0.0, right - left) * max(0.0, bottom - top)
+    area = box["width"] * box["height"]
+    return intersection / area if area > 0.0 else 0.0
+
+
 def _last_keyframe_box(track: dict[str, Any]) -> dict[str, float]:
     keyframes = cast(list[dict[str, Any]], track["keyframes"])
     return _box_mapping(keyframes[-1]["bbox"])
+
+
+def _last_keyframe_source_text(track: dict[str, Any]) -> str:
+    keyframes = cast(list[dict[str, Any]], track["keyframes"])
+    return str(keyframes[-1].get("source_text", ""))
 
 
 def _nearest_keyframe_box(track: dict[str, Any], timestamp: float) -> dict[str, float]:
     keyframes = cast(list[dict[str, Any]], track["keyframes"])
     nearest = min(keyframes, key=lambda item: abs(float(item["timestamp_seconds"]) - timestamp))
     return _box_mapping(nearest["bbox"])
+
+
+def _nearest_keyframe_source_text(track: dict[str, Any], timestamp: float) -> str:
+    keyframes = cast(list[dict[str, Any]], track["keyframes"])
+    nearest = min(keyframes, key=lambda item: abs(float(item["timestamp_seconds"]) - timestamp))
+    return str(nearest.get("source_text", ""))
 
 
 def _box_mapping(value: Any) -> dict[str, float]:

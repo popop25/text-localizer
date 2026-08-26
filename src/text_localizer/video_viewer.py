@@ -103,12 +103,48 @@ def write_video_viewer(
         return manifest.region_tracks
           .filter(track => time >= track.start_seconds && time < track.end_seconds)
           .map(track => ({{ id: track.region_track_id, region: track.region,
-                           bbox: regionTrackBox(track, time) }}));
+                           bbox: regionTrackBox(track, time),
+                           style: track.overlay_style || null }}));
       }}
       const track = findTrack(time);
       return track ? track.regions.map((region, index) => ({{
-        id: `${{track.track_id}}-${{index}}`, region, bbox: region.bbox
+        id: `${{track.track_id}}-${{index}}`, region, bbox: region.bbox, style: null
       }})) : [];
+    }}
+
+    function hexToRgba(hex, opacity) {{
+      const value = Number.parseInt(hex.slice(1), 16);
+      const red = (value >> 16) & 255;
+      const green = (value >> 8) & 255;
+      const blue = value & 255;
+      return `rgba(${{red}}, ${{green}}, ${{blue}}, ${{opacity}})`;
+    }}
+
+    function applyOverlayStyle(node, style, bbox) {{
+      if (!style) {{
+        node.style.fontSize = Math.max(10, bbox.height * video.clientHeight * .8) + "px";
+        return;
+      }}
+      node.style.color = style.foreground_color;
+      node.style.backgroundColor = hexToRgba(
+        style.background_color, style.background_opacity);
+      node.style.fontSize = Math.max(10, style.font_size_ratio * video.clientHeight) + "px";
+      node.style.fontWeight = String(style.font_weight);
+      node.style.lineHeight = String(style.line_height);
+      node.style.borderRadius = style.border_radius_px + "px";
+      node.style.textShadow = style.text_shadow;
+      node.dataset.styleConfidence = style.confidence.toFixed(3);
+    }}
+
+    function fitOverlayText(node) {{
+      const size = Number.parseFloat(node.style.fontSize);
+      if (!Number.isFinite(size)) return;
+      const minimum = Math.max(10, size * .68);
+      const widthRatio = node.scrollWidth > 0 ? node.clientWidth / node.scrollWidth : 1;
+      const heightRatio = node.scrollHeight > 0 ? node.clientHeight / node.scrollHeight : 1;
+      const fitRatio = Math.min(1, widthRatio, heightRatio);
+      if (fitRatio < 1)
+        node.style.fontSize = Math.max(minimum, size * fitRatio * .98) + "px";
     }}
 
     function render(time) {{
@@ -126,8 +162,9 @@ def write_video_viewer(
         node.style.top = (bbox.y * 100) + "%";
         node.style.width = (bbox.width * 100) + "%";
         node.style.height = (bbox.height * 100) + "%";
-        node.style.fontSize = Math.max(10, bbox.height * video.clientHeight * .8) + "px";
+        applyOverlayStyle(node, item.style, bbox);
         layer.appendChild(node);
+        fitOverlayText(node);
       }}
     }}
 
@@ -186,6 +223,9 @@ def write_video_viewer(
       : "";
     precision.textContent = manifest.schema_version === 2
       ? `Region geometry uses ${{manifest.region_tracking.algorithm}} keyframes; ` +
+        (manifest.region_styling
+          ? `overlay palette uses ${{manifest.region_styling.algorithm}}; `
+          : "overlay palette uses the fixed fallback; ") +
         `base scene bracket width is ${{manifest.sampling.transition_precision_seconds
           .toFixed(3)}} seconds.`
       : `Scene boundary estimate: maximum bracket width ` +

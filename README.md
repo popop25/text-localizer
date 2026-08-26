@@ -83,6 +83,11 @@ OCR windows, and absence-aware temporal gates. On `0.mp4`, it removes the stale 
 preserves `OpenAI`, `Rest API`, and `JSON`, and passes all six annotations and eighteen audited
 keyframes. See docs/m3.4-quality-foundation.md.
 
+M3.5 infers a validated foreground color, background color, contrast-safe fallback, and source-scale
+font size for every region track. The viewer now resembles in-place language replacement instead of
+using one fixed subtitle box, while preserving every temporal gate. See
+docs/m3.5-adaptive-overlay-style.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -139,6 +144,7 @@ text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer index-visual-events data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer track-regions data\output\sample-timeline\tracks.json data\work\sample-visual-events\visual-events.json --profile config\profiles\browser-lecture.yaml
+text-localizer style-regions data\output\sample-region-tracks\tracks.json --output data\output\sample-styled
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
 text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4

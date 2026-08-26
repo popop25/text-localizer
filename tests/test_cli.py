@@ -19,6 +19,7 @@ def test_required_commands_are_registered() -> None:
         "localize-video": ["localize-video", "placeholder"],
         "index-visual-events": ["index-visual-events", "placeholder"],
         "track-regions": ["track-regions", "tracks.json", "visual-events.json"],
+        "style-regions": ["style-regions", "tracks.json"],
         "render-tracks": ["render-tracks", "placeholder"],
         "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
         "setup-models": ["setup-models", "--ocr"],
@@ -43,6 +44,25 @@ def test_track_regions_parses_repeatable_include_windows() -> None:
     )
 
     assert namespace.include_window == [(8.0, 9.4), (120.0, 166.8)]
+
+
+def test_style_regions_parses_quality_thresholds() -> None:
+    namespace = build_parser().parse_args(
+        [
+            "style-regions",
+            "tracks.json",
+            "--background-padding-ratio",
+            "0.5",
+            "--minimum-contrast-ratio",
+            "4.5",
+            "--minimum-style-confidence",
+            "0.6",
+        ]
+    )
+
+    assert namespace.background_padding_ratio == 0.5
+    assert namespace.minimum_contrast_ratio == 4.5
+    assert namespace.minimum_style_confidence == 0.6
 
 
 def test_render_tracks_command_writes_viewer_and_editor(

@@ -13,6 +13,7 @@ from text_localizer.domain import NormalizedBox
 from text_localizer.environment import run_doctor
 from text_localizer.glossary import Glossary
 from text_localizer.logging_config import configure_logging
+from text_localizer.overlay_style import OverlayStyleOptions, style_region_tracks
 from text_localizer.pipeline import analyze_static_image
 from text_localizer.profile import (
     LocalizationProfile,
@@ -210,6 +211,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Tracking-only OCR exclusion (repeatable)",
     )
+
+    style_regions = subparsers.add_parser(
+        "style-regions",
+        help="Infer source-matched colors and font scale for schema-v2 region tracks",
+    )
+    style_regions.add_argument("path", type=Path, help="Schema-v2 tracks JSON")
+    style_regions.add_argument("--output", type=Path)
+    style_regions.add_argument("--work-dir", type=Path)
+    style_regions.add_argument("--background-padding-ratio", type=float, default=0.35)
+    style_regions.add_argument("--minimum-contrast-ratio", type=float, default=3.0)
+    style_regions.add_argument("--minimum-style-confidence", type=float, default=0.45)
 
     render_tracks = subparsers.add_parser(
         "render-tracks",
@@ -473,6 +485,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                             for key, value in manifest["metrics"].items()
                             if str(key).startswith("tracking_")
                         },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+
+        if args.command == "style-regions":
+            output = args.output or args.path.parent / "styled-region-tracks"
+            work_dir = args.work_dir or Path("data/work") / f"{output.name}-styles"
+            manifest = style_region_tracks(
+                args.path,
+                output,
+                work_dir,
+                options=OverlayStyleOptions(
+                    background_padding_ratio=args.background_padding_ratio,
+                    minimum_contrast_ratio=args.minimum_contrast_ratio,
+                    minimum_style_confidence=args.minimum_style_confidence,
+                ),
+            )
+            print(
+                json.dumps(
+                    {
+                        "tracks": str((output / "tracks.json").resolve()),
+                        "viewer": str((output / "viewer.html").resolve()),
+                        "region_styling": manifest["region_styling"],
                     },
                     ensure_ascii=False,
                     indent=2,

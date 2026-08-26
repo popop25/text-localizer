@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -104,6 +105,8 @@ def _validate_region_tracks(manifest: dict[str, Any], duration: float) -> int:
         _validate_region(region, track_id, 0)
         assert isinstance(region, dict)
         review_count += int(region["needs_review"])
+        if "overlay_style" in raw_track:
+            _validate_overlay_style(raw_track.get("overlay_style"), track_id)
 
         keyframes = raw_track.get("keyframes")
         if not isinstance(keyframes, list) or not keyframes:
@@ -486,6 +489,51 @@ def _validate_region(raw: Any, track_id: str, region_index: int) -> None:
         raise ValueError(f"Track {track_id} region {region_index} translation is invalid.")
     if not isinstance(raw.get("needs_review"), bool):
         raise ValueError(f"Track {track_id} region {region_index} needs_review must be boolean.")
+
+
+def _validate_overlay_style(raw: Any, track_id: str) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(f"Region track {track_id} overlay_style must be a mapping.")
+    if raw.get("schema_version") != 1 or raw.get("algorithm") != "source-palette-v1":
+        raise ValueError(f"Region track {track_id} overlay_style has an unsupported schema.")
+    for field in ("foreground_color", "background_color"):
+        value = raw.get(field)
+        if not isinstance(value, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", value) is None:
+            raise ValueError(f"Region track {track_id} overlay_style {field} is invalid.")
+    for field, minimum, maximum in (
+        ("background_opacity", 0.0, 1.0),
+        ("font_size_ratio", 0.0, 1.0),
+        ("line_height", 0.8, 2.0),
+        ("border_radius_px", 0.0, 100.0),
+        ("confidence", 0.0, 1.0),
+        ("background_uniformity", 0.0, 1.0),
+        ("foreground_pixel_ratio", 0.0, 1.0),
+        ("contrast_ratio", 1.0, 21.0),
+        ("sample_timestamp_seconds", 0.0, float("inf")),
+    ):
+        value = _number(raw.get(field), f"Region track {track_id} overlay_style {field}")
+        if value < minimum or value > maximum or (field == "font_size_ratio" and value == 0.0):
+            raise ValueError(f"Region track {track_id} overlay_style {field} is out of range.")
+    font_weight = raw.get("font_weight")
+    if (
+        isinstance(font_weight, bool)
+        or not isinstance(font_weight, int)
+        or font_weight < 100
+        or font_weight > 900
+    ):
+        raise ValueError(f"Region track {track_id} overlay_style font_weight is invalid.")
+    if raw.get("text_shadow") not in {"none", "0 1px 1px #000000"}:
+        raise ValueError(f"Region track {track_id} overlay_style text_shadow is invalid.")
+    for field in ("foreground_adjusted", "fallback_used"):
+        if not isinstance(raw.get(field), bool):
+            raise ValueError(f"Region track {track_id} overlay_style {field} must be boolean.")
+    fallback_reason = raw.get("fallback_reason")
+    if fallback_reason not in {None, "no-distinct-foreground", "low-style-confidence"}:
+        raise ValueError(f"Region track {track_id} overlay_style fallback_reason is invalid.")
+    if (fallback_reason is None) == (raw.get("fallback_used") is True):
+        raise ValueError(
+            f"Region track {track_id} overlay_style fallback reason does not match its state."
+        )
 
 
 def _validate_bbox(raw: Any, label: str) -> None:

@@ -73,6 +73,11 @@ exclusions from OCR masks, detects the known scrolling transitions in under real
 CPU, and emits auditable changed-tile brackets for region tracking. See
 docs/m3.2-visual-event-index.md.
 
+M3.3 adds schema-v2 independent region tracks. It OCRs only selected visual-event frames,
+reuses approved v1 translations, records hold/linear bbox keyframes, and renders them from
+decoded-frame media time. The corrected source-frame benchmark passes all temporal gates on
+0.mp4. See docs/m3.3-region-text-tracks.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -128,6 +133,7 @@ text-localizer deduplicate-frames data\work\frames --output data\work\scene-inde
 text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer index-visual-events data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
+text-localizer track-regions data\output\sample-timeline\tracks.json data\work\sample-visual-events\visual-events.json --profile config\profiles\browser-lecture.yaml
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
 text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4

@@ -112,6 +112,38 @@ def test_temporal_quality_passes_contiguous_exact_observations() -> None:
     assert all(report["gate_results"].values())
 
 
+def test_temporal_quality_reads_schema_v2_region_keyframes() -> None:
+    manifest = _manifest([[_region()], [_region()], [_region()]])
+    manifest["schema_version"] = 2
+    manifest["region_track_count"] = 1
+    manifest["region_tracks"] = [
+        {
+            "region_track_id": "region-0001",
+            "start_seconds": 0.0,
+            "end_seconds": 3.0,
+            "region": _region(),
+            "keyframes": [
+                {
+                    "timestamp_seconds": 0.0,
+                    "bbox": BOX,
+                    "interpolation": "hold",
+                },
+                {
+                    "timestamp_seconds": 1.0,
+                    "bbox": BOX,
+                    "interpolation": "linear",
+                },
+            ],
+        }
+    ]
+
+    report = evaluate_temporal_quality(manifest, parse_temporal_benchmark(_benchmark(3.0)))
+
+    assert report["track_manifest_schema_version"] == 2
+    assert report["summary"]["keyframe_recall"] == 1.0
+    assert report["summary"]["gates_passed"] is True
+
+
 def test_temporal_quality_exposes_missing_keyframe_and_flicker() -> None:
     manifest = _manifest([[_region()], [], [_region()]])
     payload = _benchmark(3.0)
@@ -182,7 +214,9 @@ def test_checked_in_zero_video_benchmark_is_valid() -> None:
     )
 
     benchmark = load_temporal_benchmark(benchmark_path)
+    payload = json.loads(benchmark_path.read_text(encoding="utf-8"))
 
     assert benchmark.name == "0.mp4 temporal overlay baseline"
+    assert payload["ground_truth"]["revision"] == 2
     assert len(benchmark.annotations) == 3
     assert sum(len(item.keyframes) for item in benchmark.annotations) == 12

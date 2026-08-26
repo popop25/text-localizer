@@ -435,6 +435,8 @@ def _evaluate_annotation(
 
 
 def _manifest_observations(manifest: dict[str, Any]) -> tuple[_Observation, ...]:
+    if manifest.get("schema_version") == 2:
+        return _region_track_observations(manifest)
     observations: list[_Observation] = []
     for raw_track in cast(list[Any], manifest["tracks"]):
         track = cast(dict[str, Any], raw_track)
@@ -453,6 +455,43 @@ def _manifest_observations(manifest: dict[str, Any]) -> tuple[_Observation, ...]
                     start_seconds=float(track["start_seconds"]),
                     end_seconds=float(track["end_seconds"]),
                     bbox=_parse_box(region.get("bbox"), "track region bbox"),
+                    region=region,
+                )
+            )
+    return tuple(observations)
+
+
+def _region_track_observations(manifest: dict[str, Any]) -> tuple[_Observation, ...]:
+    observations: list[_Observation] = []
+    for raw_track in cast(list[Any], manifest["region_tracks"]):
+        track = cast(dict[str, Any], raw_track)
+        region = cast(dict[str, Any], track["region"])
+        if region.get("action") != "translate":
+            continue
+        if region.get("needs_review") is True:
+            continue
+        if not isinstance(region.get("translated_text"), str):
+            continue
+        keyframes = [
+            cast(dict[str, Any], raw_keyframe)
+            for raw_keyframe in cast(list[Any], track["keyframes"])
+        ]
+        for index, keyframe in enumerate(keyframes):
+            start = float(keyframe["timestamp_seconds"])
+            end = (
+                float(keyframes[index + 1]["timestamp_seconds"])
+                if index + 1 < len(keyframes)
+                else float(track["end_seconds"])
+            )
+            if end <= start:
+                continue
+            observations.append(
+                _Observation(
+                    track_id=cast(str, track["region_track_id"]),
+                    region_index=0,
+                    start_seconds=start,
+                    end_seconds=end,
+                    bbox=_parse_box(keyframe.get("bbox"), "region track keyframe bbox"),
                     region=region,
                 )
             )

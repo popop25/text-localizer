@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "name": "0.mp4 temporal overlay baseline",
+  "video": {
+    "duration_seconds": 175.275102,
+    "fps": 29.97002997002997
+  },
+  "gates": {
+    "minimum_annotation_recall": 0.95,
+    "minimum_keyframe_recall": 0.95,
+    "maximum_boundary_error_ms_p95": 67.0,
+    "minimum_bbox_iou_median": 0.75,
+    "maximum_flicker_events": 0,
+    "minimum_annotation_coverage_ratio": 0.95,
+    "flicker_tolerance_seconds": 0.067,
+    "temporal_search_margin_seconds": 1.0
+  },
+  "annotations": [
+    {
+      "id": "course-title-hard-transition",
+      "label": "Course title visible between intro fade and first scroll",
+      "start_seconds": 8.1,
+      "end_seconds": 20.6,
+      "evaluate_boundaries": true,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["Azure OpenAI & LangChain 실전"]
+      },
+      "keyframes": [
+        {
+          "timestamp_seconds": 10.0,
+          "bbox": {
+            "x": 0.2833333333333333,
+            "y": 0.26666666666666666,
+            "width": 0.25625,
+            "height": 0.037037037037037035
+          }
+        }
+      ]
+    },
+    {
+      "id": "navigation-label-static-control",
+      "label": "Static navigation label remains aligned during content scroll",
+      "start_seconds": 126.0,
+      "end_seconds": 159.0,
+      "evaluate_boundaries": false,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["강의소개"]
+      },
+      "keyframes": [
+        {
+          "timestamp_seconds": 126.0,
+          "bbox": {
+            "x": 0.23385416666666667,
+            "y": 0.18981481481481483,
+            "width": 0.047916666666666635,
+            "height": 0.030555555555555558
+          }
+        },
+        {
+          "timestamp_seconds": 140.0,
+          "bbox": {
+            "x": 0.234375,
+            "y": 0.19074074074074077,
+            "width": 0.046875,
+            "height": 0.027777777777777762
+          }
+        },
+        {
+          "timestamp_seconds": 158.0,
+          "bbox": {
+            "x": 0.234375,
+            "y": 0.19074074074074077,
+            "width": 0.046875,
+            "height": 0.027777777777777762
+          }
+        }
+      ]
+    },
+    {
+      "id": "langchain-basic-scroll-track",
+      "label": "LangChain basic curriculum item follows vertical scrolling",
+      "start_seconds": 126.0,
+      "end_seconds": 166.8,
+      "evaluate_boundaries": false,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["LangChain 기초"]
+      },
+      "keyframes": [
+        {
+          "timestamp_seconds": 126.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.5351851851851852,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 130.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.46296296296296297,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 135.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.46296296296296297,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 140.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.46296296296296297,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 140.4,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.35462962962962963,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 145.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.3101851851851852,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 150.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.3101851851851852,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        },
+        {
+          "timestamp_seconds": 159.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.3101851851851852,
+            "width": 0.09947916666666667,
+            "height": 0.025
+          }
+        }
+      ]
+    }
+  ]
+}

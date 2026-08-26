@@ -18,6 +18,7 @@ def test_required_commands_are_registered() -> None:
         "index-video": ["index-video", "placeholder"],
         "localize-video": ["localize-video", "placeholder"],
         "render-tracks": ["render-tracks", "placeholder"],
+        "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
         "setup-models": ["setup-models", "--ocr"],
         "render-video": ["render-video", "placeholder"],
     }
@@ -50,3 +51,24 @@ def test_render_tracks_command_writes_viewer_and_editor(
     assert [item[0].name for item in writes] == ["viewer.html", "editor.html"]
     assert all(item[1] == Path("source.mp4") for item in writes)
     assert all(item[2] is manifest for item in writes)
+
+
+def test_evaluate_timeline_command_can_require_passing_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "evaluate_temporal_quality_files",
+        lambda *_args, **_kwargs: {"summary": {"gates_passed": False}},
+    )
+
+    status = cli.main(
+        [
+            "evaluate-timeline",
+            "tracks.json",
+            "benchmark.json",
+            "--require-pass",
+        ]
+    )
+
+    assert status == 1

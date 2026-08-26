@@ -25,6 +25,7 @@ from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
+from text_localizer.temporal_quality import evaluate_temporal_quality_files
 from text_localizer.timeline import index_video_timeline, localize_scene_index
 from text_localizer.track_editor import load_track_manifest, write_track_editor
 from text_localizer.video import extract_representative_frames, inspect_video
@@ -160,6 +161,18 @@ def build_parser() -> argparse.ArgumentParser:
     render_tracks.add_argument("path", type=Path)
     render_tracks.add_argument("--output", type=Path)
     render_tracks.add_argument("--video", type=Path)
+    evaluate_timeline = subparsers.add_parser(
+        "evaluate-timeline",
+        help="Measure temporal overlay quality against an annotated benchmark",
+    )
+    evaluate_timeline.add_argument("path", type=Path, help="Validated tracks JSON")
+    evaluate_timeline.add_argument("benchmark", type=Path, help="Temporal benchmark JSON")
+    evaluate_timeline.add_argument("--output", type=Path)
+    evaluate_timeline.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Return a non-zero status when a quality gate fails",
+    )
     render_video = subparsers.add_parser(
         "render-video",
         help="Burn approved Japanese tracks into a new H.264 MP4",
@@ -311,6 +324,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "evaluate-timeline":
+            report = evaluate_temporal_quality_files(
+                args.path,
+                args.benchmark,
+                output_path=args.output,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            if args.require_pass and not report["summary"]["gates_passed"]:
+                return 1
             return 0
 
         if args.command in {"index-video", "localize-video"}:

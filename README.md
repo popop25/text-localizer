@@ -59,6 +59,11 @@ fallback audit metrics, and makes the recurring LangChain course objective deter
 the saved profile. See `docs/m2.3-protected-term-fallback.md` for the failure probes and
 zero-review automatic full-video validation.
 
+M3.0 adds an annotated temporal-quality benchmark and a model-free evaluator for visible
+interval coverage, keyframe recall, boundary error, spatial IoU, and flicker. The first
+0.mp4 baseline proves that hard scene transitions are already precise while scrolling text
+needs independent region tracking. See docs/m3.0-temporal-quality-benchmark.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -114,6 +119,7 @@ text-localizer deduplicate-frames data\work\frames --output data\work\scene-inde
 text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
+text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
 text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4
 ```
 

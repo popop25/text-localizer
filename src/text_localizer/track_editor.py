@@ -20,8 +20,9 @@ def load_track_manifest(path: Path) -> dict[str, Any]:
 
 
 def validate_track_manifest(manifest: dict[str, Any]) -> None:
-    if manifest.get("schema_version") != 1:
-        raise ValueError("Track manifest schema_version must be 1.")
+    schema_version = manifest.get("schema_version")
+    if schema_version not in {1, 2}:
+        raise ValueError("Track manifest schema_version must be 1 or 2.")
     video = manifest.get("video")
     tracks = manifest.get("tracks")
     sampling = manifest.get("sampling")
@@ -73,8 +74,66 @@ def validate_track_manifest(manifest: dict[str, Any]) -> None:
             actual_review_count += int(region["needs_review"])
     if previous_end is None or abs(previous_end - duration) > TIME_TOLERANCE_SECONDS:
         raise ValueError("The final track must end at the video duration.")
+    if schema_version == 2:
+        actual_review_count = _validate_region_tracks(manifest, duration)
     if review_count != actual_review_count:
         raise ValueError("Track manifest needs_review_count does not match its regions.")
+
+
+def _validate_region_tracks(manifest: dict[str, Any], duration: float) -> int:
+    raw_tracks = manifest.get("region_tracks")
+    if not isinstance(raw_tracks, list) or not raw_tracks:
+        raise ValueError("Schema-v2 track manifest requires region_tracks.")
+    if manifest.get("region_track_count") != len(raw_tracks):
+        raise ValueError("Track manifest region_track_count does not match region_tracks.")
+
+    track_ids: set[str] = set()
+    review_count = 0
+    for track_index, raw_track in enumerate(raw_tracks):
+        if not isinstance(raw_track, dict):
+            raise ValueError(f"Region track {track_index} must be a mapping.")
+        track_id = raw_track.get("region_track_id")
+        if not isinstance(track_id, str) or not track_id or track_id in track_ids:
+            raise ValueError(f"Region track {track_index} has an invalid or duplicate id.")
+        track_ids.add(track_id)
+        start = _number(raw_track.get("start_seconds"), f"region_tracks[{track_index}].start")
+        end = _number(raw_track.get("end_seconds"), f"region_tracks[{track_index}].end")
+        if start < 0.0 or end <= start or end > duration + TIME_TOLERANCE_SECONDS:
+            raise ValueError(f"Region track {track_id} has an invalid time range.")
+        region = raw_track.get("region")
+        _validate_region(region, track_id, 0)
+        assert isinstance(region, dict)
+        review_count += int(region["needs_review"])
+
+        keyframes = raw_track.get("keyframes")
+        if not isinstance(keyframes, list) or not keyframes:
+            raise ValueError(f"Region track {track_id} requires keyframes.")
+        previous_timestamp: float | None = None
+        for keyframe_index, keyframe in enumerate(keyframes):
+            if not isinstance(keyframe, dict):
+                raise ValueError(
+                    f"Region track {track_id} keyframe {keyframe_index} must be a mapping."
+                )
+            timestamp = _number(
+                keyframe.get("timestamp_seconds"),
+                f"region_tracks[{track_index}].keyframes[{keyframe_index}].timestamp",
+            )
+            if timestamp < start - TIME_TOLERANCE_SECONDS or timestamp > end:
+                raise ValueError(f"Region track {track_id} keyframe is outside its time range.")
+            if previous_timestamp is not None and timestamp <= previous_timestamp:
+                raise ValueError(f"Region track {track_id} keyframes must be strictly ordered.")
+            previous_timestamp = timestamp
+            _validate_bbox(
+                keyframe.get("bbox"),
+                f"Region track {track_id} keyframe {keyframe_index}",
+            )
+            if keyframe.get("interpolation") not in {"hold", "linear"}:
+                raise ValueError(
+                    f"Region track {track_id} keyframe interpolation must be hold or linear."
+                )
+        if abs(float(keyframes[0]["timestamp_seconds"]) - start) > TIME_TOLERANCE_SECONDS:
+            raise ValueError(f"Region track {track_id} first keyframe must match its start time.")
+    return review_count
 
 
 def write_track_editor(
@@ -83,6 +142,8 @@ def write_track_editor(
     manifest: dict[str, Any],
 ) -> None:
     validate_track_manifest(manifest)
+    if manifest.get("schema_version") == 2:
+        raise ValueError("Schema-v2 region keyframes are read-only; use viewer.html for review.")
     manifest_json = json.dumps(manifest, ensure_ascii=False).replace("<", "\\u003c")
     video_json = json.dumps(video_path.resolve().as_uri()).replace("<", "\\u003c")
     html = f"""<!doctype html>
@@ -419,27 +480,31 @@ def write_track_editor(
 def _validate_region(raw: Any, track_id: str, region_index: int) -> None:
     if not isinstance(raw, dict):
         raise ValueError(f"Track {track_id} region {region_index} must be a mapping.")
-    bbox = raw.get("bbox")
+    _validate_bbox(raw.get("bbox"), f"Track {track_id} region {region_index}")
+    translated = raw.get("translated_text")
+    if translated is not None and not isinstance(translated, str):
+        raise ValueError(f"Track {track_id} region {region_index} translation is invalid.")
+    if not isinstance(raw.get("needs_review"), bool):
+        raise ValueError(f"Track {track_id} region {region_index} needs_review must be boolean.")
+
+
+def _validate_bbox(raw: Any, label: str) -> None:
+    bbox = raw
     if not isinstance(bbox, dict):
-        raise ValueError(f"Track {track_id} region {region_index} requires bbox.")
+        raise ValueError(f"{label} requires bbox.")
     try:
         x = float(bbox["x"])
         y = float(bbox["y"])
         width = float(bbox["width"])
         height = float(bbox["height"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"Track {track_id} region {region_index} bbox is invalid.") from exc
+        raise ValueError(f"{label} bbox is invalid.") from exc
     if not all(math.isfinite(value) for value in (x, y, width, height)):
-        raise ValueError(f"Track {track_id} region {region_index} bbox is invalid.")
+        raise ValueError(f"{label} bbox is invalid.")
     if min(x, y, width, height) < 0.0 or width <= 0.0 or height <= 0.0:
-        raise ValueError(f"Track {track_id} region {region_index} bbox is invalid.")
+        raise ValueError(f"{label} bbox is invalid.")
     if x + width > 1.000001 or y + height > 1.000001:
-        raise ValueError(f"Track {track_id} region {region_index} bbox exceeds the image.")
-    translated = raw.get("translated_text")
-    if translated is not None and not isinstance(translated, str):
-        raise ValueError(f"Track {track_id} region {region_index} translation is invalid.")
-    if not isinstance(raw.get("needs_review"), bool):
-        raise ValueError(f"Track {track_id} region {region_index} needs_review must be boolean.")
+        raise ValueError(f"{label} bbox exceeds the image.")
 
 
 def _number(value: Any, name: str) -> float:

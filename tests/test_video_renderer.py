@@ -193,6 +193,35 @@ def test_final_render_refuses_review_flags(tmp_path: Path) -> None:
         render_localized_video(manifest_path, tmp_path / "localized.mp4")
 
 
+def test_final_render_refuses_schema_v2_keyframes(tmp_path: Path) -> None:
+    source = tmp_path / "lecture.mp4"
+    source.write_bytes(b"source")
+    manifest = _manifest(source)
+    region = dict(manifest["tracks"][0]["regions"][0])
+    manifest["schema_version"] = 2
+    manifest["region_track_count"] = 1
+    manifest["region_tracks"] = [
+        {
+            "region_track_id": "region-0001",
+            "start_seconds": 0.0,
+            "end_seconds": 10.0,
+            "region": region,
+            "keyframes": [
+                {
+                    "timestamp_seconds": 0.0,
+                    "bbox": region["bbox"],
+                    "interpolation": "hold",
+                }
+            ],
+        }
+    ]
+    manifest_path = tmp_path / "tracks.v2.json"
+    _write_manifest(manifest_path, manifest)
+
+    with pytest.raises(ValueError, match="cannot yet be burned"):
+        render_localized_video(manifest_path, tmp_path / "localized.mp4")
+
+
 def test_final_render_refuses_original_or_existing_output(tmp_path: Path) -> None:
     source = tmp_path / "lecture.mp4"
     source.write_bytes(b"source")

@@ -52,6 +52,10 @@ def render_localized_video(
 ) -> dict[str, Any]:
     active_options = options or VideoRenderOptions()
     manifest = load_track_manifest(track_manifest_path)
+    if manifest.get("schema_version") == 2:
+        raise ValueError(
+            "Schema-v2 region keyframes cannot yet be burned into MP4; review viewer.html."
+        )
     review_count = int(manifest["metrics"]["needs_review_count"])
     if review_count:
         raise ValueError(f"Final video rendering requires zero review flags; found {review_count}.")

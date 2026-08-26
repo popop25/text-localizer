@@ -77,20 +77,56 @@ def write_video_viewer(
       );
     }}
 
-    function render(track) {{
+    function interpolateBox(left, right, fraction) {{
+      const value = key => left[key] + (right[key] - left[key]) * fraction;
+      return {{ x: value("x"), y: value("y"), width: value("width"),
+                height: value("height") }};
+    }}
+
+    function regionTrackBox(track, time) {{
+      const keyframes = track.keyframes;
+      const followingIndex = keyframes.findIndex(item => item.timestamp_seconds > time);
+      let index = followingIndex < 0 ? keyframes.length - 1 : followingIndex - 1;
+      if (index < 0) index = 0;
+      const current = keyframes[index];
+      const following = keyframes[index + 1];
+      if (!following || current.interpolation !== "linear") return current.bbox;
+      const span = following.timestamp_seconds - current.timestamp_seconds;
+      if (span <= 0) return current.bbox;
+      const fraction = Math.min(1, Math.max(0,
+        (time - current.timestamp_seconds) / span));
+      return interpolateBox(current.bbox, following.bbox, fraction);
+    }}
+
+    function activeRegions(time) {{
+      if (manifest.schema_version === 2) {{
+        return manifest.region_tracks
+          .filter(track => time >= track.start_seconds && time < track.end_seconds)
+          .map(track => ({{ id: track.region_track_id, region: track.region,
+                           bbox: regionTrackBox(track, time) }}));
+      }}
+      const track = findTrack(time);
+      return track ? track.regions.map((region, index) => ({{
+        id: `${{track.track_id}}-${{index}}`, region, bbox: region.bbox
+      }})) : [];
+    }}
+
+    function render(time) {{
       layer.replaceChildren();
-      if (!track || !toggle.checked) return;
-      for (const region of track.regions) {{
+      if (!toggle.checked) return;
+      for (const item of activeRegions(time)) {{
+        const region = item.region;
+        const bbox = item.bbox;
         if (region.action !== "translate" ||
             !region.translated_text || region.needs_review) continue;
         const node = document.createElement("div");
         node.className = "overlay";
         node.textContent = region.translated_text;
-        node.style.left = (region.bbox.x * 100) + "%";
-        node.style.top = (region.bbox.y * 100) + "%";
-        node.style.width = (region.bbox.width * 100) + "%";
-        node.style.height = (region.bbox.height * 100) + "%";
-        node.style.fontSize = Math.max(10, region.bbox.height * video.clientHeight * .8) + "px";
+        node.style.left = (bbox.x * 100) + "%";
+        node.style.top = (bbox.y * 100) + "%";
+        node.style.width = (bbox.width * 100) + "%";
+        node.style.height = (bbox.height * 100) + "%";
+        node.style.fontSize = Math.max(10, bbox.height * video.clientHeight * .8) + "px";
         layer.appendChild(node);
       }}
     }}
@@ -98,11 +134,14 @@ def write_video_viewer(
     function update(mediaTime = video.currentTime) {{
       const track = findTrack(mediaTime);
       const nextTrackId = track ? track.track_id : null;
-      if (nextTrackId !== activeTrackId) {{
+      if (manifest.schema_version === 2 || nextTrackId !== activeTrackId) {{
         activeTrackId = nextTrackId;
-        render(track);
+        render(mediaTime);
       }}
-      status.textContent = `${{formatTime(mediaTime)}} · ${{nextTrackId || "no scene"}}`;
+      const label = manifest.schema_version === 2
+        ? `${{activeRegions(mediaTime).length}} region track(s)`
+        : (nextTrackId || "no scene");
+      status.textContent = `${{formatTime(mediaTime)}} · ${{label}}`;
     }}
 
     function startVideoFrameClock() {{
@@ -130,7 +169,7 @@ def write_video_viewer(
       fallbackFrameRequest = requestAnimationFrame(onAnimationFrame);
     }}
 
-    toggle.addEventListener("change", () => render(findTrack(video.currentTime)));
+    toggle.addEventListener("change", () => render(video.currentTime));
     video.addEventListener("loadedmetadata", () => {{
       update();
       startVideoFrameClock();
@@ -141,12 +180,16 @@ def write_video_viewer(
     }});
     video.addEventListener("seeked", () => update());
     video.addEventListener("pause", () => update());
-    window.addEventListener("resize", () => render(findTrack(video.currentTime)));
+    window.addEventListener("resize", () => render(video.currentTime));
     review.textContent = manifest.metrics.needs_review_count
       ? `${{manifest.metrics.needs_review_count}} review flag(s)`
       : "";
-    precision.textContent = `Scene boundary estimate: maximum bracket width ` +
-      `${{manifest.sampling.transition_precision_seconds.toFixed(3)}} seconds.`;
+    precision.textContent = manifest.schema_version === 2
+      ? `Region geometry uses ${{manifest.region_tracking.algorithm}} keyframes; ` +
+        `base scene bracket width is ${{manifest.sampling.transition_precision_seconds
+          .toFixed(3)}} seconds.`
+      : `Scene boundary estimate: maximum bracket width ` +
+        `${{manifest.sampling.transition_precision_seconds.toFixed(3)}} seconds.`;
 
     video.src = videoSource;
   </script>

@@ -116,3 +116,29 @@ def test_track_editor_escapes_script_terminators(tmp_path: Path) -> None:
     html = output_path.read_text(encoding="utf-8")
     assert "</script><script>bad()" not in html
     assert "\\u003c/script>" in html
+
+
+def test_schema_v2_manifest_validates_but_editor_is_read_only(tmp_path: Path) -> None:
+    manifest = _manifest()
+    region = dict(manifest["tracks"][0]["regions"][0])
+    manifest["schema_version"] = 2
+    manifest["region_track_count"] = 1
+    manifest["region_tracks"] = [
+        {
+            "region_track_id": "region-0001",
+            "start_seconds": 0.0,
+            "end_seconds": 10.0,
+            "region": region,
+            "keyframes": [
+                {
+                    "timestamp_seconds": 0.0,
+                    "bbox": region["bbox"],
+                    "interpolation": "hold",
+                }
+            ],
+        }
+    ]
+
+    validate_track_manifest(manifest)
+    with pytest.raises(ValueError, match="read-only"):
+        write_track_editor(tmp_path / "editor.html", tmp_path / "video.mp4", manifest)

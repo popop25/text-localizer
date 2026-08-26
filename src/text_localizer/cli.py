@@ -24,6 +24,7 @@ from text_localizer.profile import (
 )
 from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
+from text_localizer.region_tracks import RegionTrackingOptions, localize_region_tracks
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.temporal_quality import evaluate_temporal_quality_files
@@ -178,6 +179,31 @@ def build_parser() -> argparse.ArgumentParser:
     index_visual_events.add_argument("--minimum-changed-tiles", type=int)
     index_visual_events.add_argument("--global-change-ratio", type=float)
 
+    track_regions = subparsers.add_parser(
+        "track-regions",
+        help="OCR visual-event keyframes and emit independent schema-v2 region tracks",
+    )
+    track_regions.add_argument("path", type=Path, help="Schema-v1 tracks JSON")
+    track_regions.add_argument("visual_events", type=Path, help="Visual-events JSON")
+    track_regions.add_argument("--profile", type=Path)
+    track_regions.add_argument("--output", type=Path)
+    track_regions.add_argument("--work-dir", type=Path)
+    track_regions.add_argument("--models-root", type=Path, default=Path("models"))
+    track_regions.add_argument("--glossary", type=Path)
+    track_regions.add_argument("--minimum-event-ratio", type=float, default=0.25)
+    track_regions.add_argument("--maximum-event-duration", type=float, default=1.5)
+    track_regions.add_argument("--minimum-text-similarity", type=float, default=0.68)
+    track_regions.add_argument("--tile-padding", type=int, default=0)
+    track_regions.add_argument("--start-seconds", type=float)
+    track_regions.add_argument("--end-seconds", type=float)
+    track_regions.add_argument(
+        "--exclude-roi",
+        type=_parse_normalized_box,
+        action="append",
+        default=[],
+        help="Tracking-only OCR exclusion (repeatable)",
+    )
+
     render_tracks = subparsers.add_parser(
         "render-tracks",
         help="Validate edited tracks and regenerate the viewer and editor",
@@ -323,12 +349,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             video_path = args.video or Path(str(manifest["video"]["path"]))
             output = args.output or args.path.parent
             write_video_viewer(output / "viewer.html", video_path, manifest)
-            write_track_editor(output / "editor.html", video_path, manifest)
+            editor_path: Path | None = None
+            if manifest.get("schema_version") != 2:
+                editor_path = output / "editor.html"
+                write_track_editor(editor_path, video_path, manifest)
             print(
                 json.dumps(
                     {
                         "viewer": str((output / "viewer.html").resolve()),
-                        "editor": str((output / "editor.html").resolve()),
+                        "editor": str(editor_path.resolve()) if editor_path is not None else None,
                     },
                     indent=2,
                 )
@@ -384,6 +413,51 @@ def main(argv: Sequence[str] | None = None) -> int:
                 options=visual_options,
             )
             print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "track-regions":
+            profile = load_profile(args.profile) if args.profile is not None else None
+            analysis_options = merge_analysis_options(profile)
+            tracking_exclusions = (
+                profile.visual_events.exclude_regions if profile is not None else ()
+            ) + tuple(args.exclude_roi)
+            output = args.output or args.path.parent / "region-tracks"
+            work_dir = args.work_dir or Path("data/work") / f"{output.name}-region-tracks"
+            manifest = localize_region_tracks(
+                args.path,
+                args.visual_events,
+                output,
+                work_dir,
+                PaddleOcrProvider(args.models_root),
+                glossary=Glossary.from_yaml(resolve_glossary_path(profile, args.glossary)),
+                analysis_options=analysis_options,
+                tracking_exclude_regions=tracking_exclusions,
+                options=RegionTrackingOptions(
+                    minimum_event_ratio=args.minimum_event_ratio,
+                    maximum_event_duration_seconds=args.maximum_event_duration,
+                    minimum_text_similarity=args.minimum_text_similarity,
+                    tile_padding=args.tile_padding,
+                    start_seconds=args.start_seconds,
+                    end_seconds=args.end_seconds,
+                ),
+            )
+            print(
+                json.dumps(
+                    {
+                        "tracks": str((output / "tracks.json").resolve()),
+                        "viewer": str((output / "viewer.html").resolve()),
+                        "region_track_count": manifest["region_track_count"],
+                        "region_tracking": manifest["region_tracking"],
+                        "metrics": {
+                            key: value
+                            for key, value in manifest["metrics"].items()
+                            if str(key).startswith("tracking_")
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
 
         if args.command in {"index-video", "localize-video"}:

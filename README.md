@@ -68,6 +68,11 @@ M3.1 drives the generated viewer and editor preview from decoded video-frame med
 with an animation-frame fallback for older browsers. It removes playback-clock lag while
 leaving the failing region-tracking benchmark visible. See docs/m3.1-frame-synced-viewer.md.
 
+M3.2 adds exact 0.2-second, tiled visual-event indexing before OCR. It separates temporal
+exclusions from OCR masks, detects the known scrolling transitions in under real time on
+CPU, and emits auditable changed-tile brackets for region tracking. See
+docs/m3.2-visual-event-index.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -121,6 +126,7 @@ text-localizer extract-frames data\input\sample.mp4 --count 20
 text-localizer analyze-image data\work\frames\frame-0001.png --output data\output\frame-0001
 text-localizer deduplicate-frames data\work\frames --output data\work\scene-index.json
 text-localizer index-video data\input\sample.mp4 --sample-interval 1
+text-localizer index-visual-events data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json

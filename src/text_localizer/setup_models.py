@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from text_localizer.providers.translation import GEMMA3_270M_PROVIDER, M2M100_PROVIDER
+
 
 def setup_ocr_models(models_root: Path) -> Path:
     target = models_root / "paddleocr"
@@ -44,8 +46,34 @@ def setup_ocr_models(models_root: Path) -> Path:
     return marker
 
 
-def setup_translation_model(models_root: Path) -> Path:
-    target = models_root / "m2m100_418M"
+def setup_translation_model(models_root: Path, provider: str = M2M100_PROVIDER) -> Path:
+    if provider == M2M100_PROVIDER:
+        repo_id = "facebook/m2m100_418M"
+        target = models_root / "m2m100_418M"
+        allow_patterns = [
+            "config.json",
+            "generation_config.json",
+            "pytorch_model.bin",
+            "sentencepiece.bpe.model",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+            "vocab.json",
+        ]
+    elif provider == GEMMA3_270M_PROVIDER:
+        repo_id = "sappho192/gemma3-multilingual-translator-270m"
+        target = models_root / "gemma3-multilingual-translator-270m"
+        allow_patterns = [
+            "added_tokens.json",
+            "config.json",
+            "generation_config.json",
+            "model.safetensors",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "tokenizer.model",
+            "tokenizer_config.json",
+        ]
+    else:
+        raise ValueError(f"Unsupported translation provider: {provider}")
     target.mkdir(parents=True, exist_ok=True)
     try:
         hub: Any = importlib.import_module("huggingface_hub")
@@ -57,16 +85,8 @@ def setup_translation_model(models_root: Path) -> Path:
         ) from exc
 
     hub.snapshot_download(
-        repo_id="facebook/m2m100_418M",
-        allow_patterns=[
-            "config.json",
-            "generation_config.json",
-            "pytorch_model.bin",
-            "sentencepiece.bpe.model",
-            "special_tokens_map.json",
-            "tokenizer_config.json",
-            "vocab.json",
-        ],
+        repo_id=repo_id,
+        allow_patterns=allow_patterns,
         local_dir=str(target),
     )
     return target

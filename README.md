@@ -88,6 +88,11 @@ font size for every region track. The viewer now resembles in-place language rep
 using one fixed subtitle box, while preserving every temporal gate. See
 docs/m3.5-adaptive-overlay-style.md.
 
+M3.6 adds a human-reviewed Korean-to-Japanese semantic benchmark, a model-independent stored-track
+evaluator, repeatable local-provider benchmarking, and schema-v2 retranslation that preserves all
+keyframes and adaptive styles. The default CPU provider is now the 270M Gemma3 translator; the
+previous M2M100 provider remains selectable. See docs/m3.6-translation-quality.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -129,8 +134,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-models.ps1 -Model all
 ```
 
 The application runs providers in offline/local-only mode after setup. PaddleOCR uses the
-mobile detection model and Korean mobile recognition model on CPU. Translation loads only
-from `models\m2m100_418M`. All downloaded content under `models\` is ignored by Git.
+mobile detection model and Korean mobile recognition model on CPU. Translation defaults to
+`models\gemma3-multilingual-translator-270m`; the previous `models\m2m100_418M` provider remains
+available through `--translation-provider m2m100`. All downloaded content under `models\` is
+ignored by Git and is not redistributed by this repository.
 
 ## Commands
 
@@ -145,10 +152,18 @@ text-localizer index-visual-events data\input\sample.mp4 --profile config\profil
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer track-regions data\output\sample-timeline\tracks.json data\work\sample-visual-events\visual-events.json --profile config\profiles\browser-lecture.yaml
 text-localizer style-regions data\output\sample-region-tracks\tracks.json --output data\output\sample-styled
+text-localizer retranslate-tracks data\output\sample-styled\tracks.json --output data\output\sample-retranslated
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
+text-localizer evaluate-translations data\output\sample-retranslated\tracks.json config\benchmarks\0-translation-quality.json
+text-localizer benchmark-translator config\benchmarks\0-translation-quality.json --translation-provider gemma3-270m
 text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4
 ```
+
+`analyze-image`, `localize-video`, `retranslate-tracks`, and `benchmark-translator` default to
+`gemma3-270m`. Pass `--translation-provider m2m100` for a controlled comparison or compatibility
+run. `retranslate-tracks` changes only canonical schema-v2 translations; OCR observations,
+region keyframes, and adaptive overlay styles are retained exactly.
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
 inside that area. Coordinates are normalized `x,y,width,height` values against the full

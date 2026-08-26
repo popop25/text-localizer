@@ -23,14 +23,25 @@ from text_localizer.profile import (
     merge_visual_event_options,
     resolve_glossary_path,
 )
-from text_localizer.providers.m2m100 import M2M100TranslationProvider
 from text_localizer.providers.paddleocr import PaddleOcrProvider
+from text_localizer.providers.translation import (
+    GEMMA3_270M_PROVIDER,
+    TRANSLATION_PROVIDER_CHOICES,
+    create_translation_provider,
+)
 from text_localizer.region_tracks import RegionTrackingOptions, localize_region_tracks
+from text_localizer.retranslate_tracks import retranslate_region_tracks
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
 from text_localizer.temporal_quality import evaluate_temporal_quality_files
 from text_localizer.timeline import index_video_timeline, localize_scene_index
 from text_localizer.track_editor import load_track_manifest, write_track_editor
+from text_localizer.translation_quality import (
+    benchmark_translation_provider,
+    evaluate_translation_quality_files,
+    load_translation_benchmark,
+    write_translation_quality_report,
+)
 from text_localizer.video import extract_representative_frames, inspect_video
 from text_localizer.video_renderer import VideoRenderOptions, render_localized_video
 from text_localizer.video_viewer import write_video_viewer
@@ -57,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("path", type=Path)
     analyze.add_argument("--output", type=Path)
     analyze.add_argument("--models-root", type=Path, default=Path("models"))
+    analyze.add_argument(
+        "--translation-provider",
+        choices=TRANSLATION_PROVIDER_CHOICES,
+        default=GEMMA3_270M_PROVIDER,
+    )
     analyze.add_argument("--profile", type=Path)
     analyze.add_argument(
         "--cache",
@@ -134,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     localize_video.add_argument("--output", type=Path)
     localize_video.add_argument("--sample-interval", type=float, default=1.0)
     localize_video.add_argument("--models-root", type=Path, default=Path("models"))
+    localize_video.add_argument(
+        "--translation-provider",
+        choices=TRANSLATION_PROVIDER_CHOICES,
+        default=GEMMA3_270M_PROVIDER,
+    )
     localize_video.add_argument(
         "--cache",
         type=Path,
@@ -223,6 +244,25 @@ def build_parser() -> argparse.ArgumentParser:
     style_regions.add_argument("--minimum-contrast-ratio", type=float, default=3.0)
     style_regions.add_argument("--minimum-style-confidence", type=float, default=0.45)
 
+    retranslate_tracks = subparsers.add_parser(
+        "retranslate-tracks",
+        help="Retranslate schema-v2 region tracks without rerunning OCR or tracking",
+    )
+    retranslate_tracks.add_argument("path", type=Path, help="Schema-v2 tracks JSON")
+    retranslate_tracks.add_argument("--output", type=Path)
+    retranslate_tracks.add_argument("--models-root", type=Path, default=Path("models"))
+    retranslate_tracks.add_argument(
+        "--translation-provider",
+        choices=TRANSLATION_PROVIDER_CHOICES,
+        default=GEMMA3_270M_PROVIDER,
+    )
+    retranslate_tracks.add_argument(
+        "--glossary",
+        type=Path,
+        default=Path("config/glossary.ko-ja.yaml"),
+    )
+    retranslate_tracks.add_argument("--batch-size", type=int, default=4)
+
     render_tracks = subparsers.add_parser(
         "render-tracks",
         help="Validate edited tracks and regenerate the viewer and editor",
@@ -242,6 +282,37 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return a non-zero status when a quality gate fails",
     )
+    evaluate_translations = subparsers.add_parser(
+        "evaluate-translations",
+        help="Measure stored Korean-to-Japanese translations against a benchmark",
+    )
+    evaluate_translations.add_argument("path", type=Path, help="Validated tracks JSON")
+    evaluate_translations.add_argument("benchmark", type=Path, help="Translation benchmark JSON")
+    evaluate_translations.add_argument("--output", type=Path)
+    evaluate_translations.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Return a non-zero status when a quality gate fails",
+    )
+    benchmark_translator = subparsers.add_parser(
+        "benchmark-translator",
+        help="Run a local translation provider against a Korean-to-Japanese benchmark",
+    )
+    benchmark_translator.add_argument("benchmark", type=Path)
+    benchmark_translator.add_argument("--models-root", type=Path, default=Path("models"))
+    benchmark_translator.add_argument(
+        "--translation-provider",
+        choices=TRANSLATION_PROVIDER_CHOICES,
+        default=GEMMA3_270M_PROVIDER,
+    )
+    benchmark_translator.add_argument(
+        "--glossary",
+        type=Path,
+        default=Path("config/glossary.ko-ja.yaml"),
+    )
+    benchmark_translator.add_argument("--batch-size", type=int, default=4)
+    benchmark_translator.add_argument("--output", type=Path)
+    benchmark_translator.add_argument("--require-pass", action="store_true")
     render_video = subparsers.add_parser(
         "render-video",
         help="Burn approved Japanese tracks into a new H.264 MP4",
@@ -256,6 +327,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup = subparsers.add_parser("setup-models", help="Explicitly download model files")
     setup.add_argument("--ocr", action="store_true")
     setup.add_argument("--translation", action="store_true")
+    setup.add_argument(
+        "--translation-provider",
+        choices=TRANSLATION_PROVIDER_CHOICES,
+        default=GEMMA3_270M_PROVIDER,
+    )
     setup.add_argument("--models-root", type=Path, default=Path("models"))
     return parser
 
@@ -320,7 +396,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = args.output or Path("data/output") / args.path.stem
             profile = load_profile(args.profile) if args.profile is not None else None
             ocr_provider = PaddleOcrProvider(args.models_root)
-            translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
+            translation_provider = create_translation_provider(
+                args.translation_provider,
+                args.models_root,
+            )
             options = merge_analysis_options(
                 profile,
                 roi=args.roi,
@@ -416,6 +495,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.benchmark,
                 output_path=args.output,
             )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            if args.require_pass and not report["summary"]["gates_passed"]:
+                return 1
+            return 0
+
+        if args.command == "evaluate-translations":
+            report = evaluate_translation_quality_files(
+                args.path,
+                args.benchmark,
+                output_path=args.output,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            if args.require_pass and not report["summary"]["gates_passed"]:
+                return 1
+            return 0
+
+        if args.command == "benchmark-translator":
+            report = benchmark_translation_provider(
+                create_translation_provider(args.translation_provider, args.models_root),
+                load_translation_benchmark(args.benchmark),
+                Glossary.from_yaml(args.glossary),
+                batch_size=args.batch_size,
+            )
+            if args.output is not None:
+                write_translation_quality_report(args.output, report)
             print(json.dumps(report, ensure_ascii=False, indent=2))
             if args.require_pass and not report["summary"]["gates_passed"]:
                 return 1
@@ -518,6 +622,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
 
+        if args.command == "retranslate-tracks":
+            output = args.output or args.path.parent / "retranslated-region-tracks"
+            report = retranslate_region_tracks(
+                args.path,
+                output,
+                create_translation_provider(args.translation_provider, args.models_root),
+                Glossary.from_yaml(args.glossary),
+                batch_size=args.batch_size,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+
         if args.command in {"index-video", "localize-video"}:
             profile = load_profile(args.profile) if args.profile is not None else None
             analysis_options = merge_analysis_options(
@@ -550,7 +666,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             output = args.output or Path("data/output") / f"{args.path.stem}-timeline"
             ocr_provider = PaddleOcrProvider(args.models_root)
-            translation_provider = M2M100TranslationProvider(args.models_root / "m2m100_418M")
+            translation_provider = create_translation_provider(
+                args.translation_provider,
+                args.models_root,
+            )
             manifest = localize_scene_index(
                 scene_index,
                 output,
@@ -570,7 +689,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.ocr:
                 prepared["ocr"] = str(setup_ocr_models(args.models_root))
             if args.translation:
-                prepared["translation"] = str(setup_translation_model(args.models_root))
+                prepared["translation"] = str(
+                    setup_translation_model(args.models_root, args.translation_provider)
+                )
             print(json.dumps(prepared, indent=2))
             return 0
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:

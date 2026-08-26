@@ -197,6 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     track_regions.add_argument("--start-seconds", type=float)
     track_regions.add_argument("--end-seconds", type=float)
     track_regions.add_argument(
+        "--include-window",
+        type=_parse_time_window,
+        action="append",
+        default=[],
+        help="OCR events overlapping START:END seconds (repeatable; exclusive with bounds)",
+    )
+    track_regions.add_argument(
         "--exclude-roi",
         type=_parse_normalized_box,
         action="append",
@@ -256,6 +263,18 @@ def _parse_normalized_box(value: str) -> NormalizedBox:
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
             "Expected normalized x,y,width,height values between 0 and 1."
+        ) from exc
+
+
+def _parse_time_window(value: str) -> tuple[float, float]:
+    try:
+        parts = [float(part.strip()) for part in value.split(":")]
+        if len(parts) != 2 or parts[0] < 0.0 or parts[1] <= parts[0]:
+            raise ValueError
+        return parts[0], parts[1]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected a START:END window with 0 <= START < END."
         ) from exc
 
 
@@ -439,6 +458,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tile_padding=args.tile_padding,
                     start_seconds=args.start_seconds,
                     end_seconds=args.end_seconds,
+                    include_windows=tuple(args.include_window),
                 ),
             )
             print(

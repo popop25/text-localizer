@@ -2,9 +2,9 @@
   "schema_version": 1,
   "name": "0.mp4 temporal overlay baseline",
   "ground_truth": {
-    "revision": 2,
+    "revision": 3,
     "method": "visual audit of exact 0.2-second source frames",
-    "note": "Revision 1 recorded each LangChain row one scroll state too early in time."
+    "note": "Revision 3 adds absence coverage and OCR-consensus controls without changing the corrected LangChain geometry from revision 2."
   },
   "video": {
     "duration_seconds": 175.275102,
@@ -167,6 +167,101 @@
             "y": 0.3842592592592593,
             "width": 0.09947916666666667,
             "height": 0.025
+          }
+        }
+      ]
+    },
+    {
+      "id": "company-logo-does-not-leak",
+      "label": "Intro company logo translation is absent from the stable lecture page",
+      "start_seconds": 10.0,
+      "end_seconds": 20.0,
+      "expect_visible": false,
+      "evaluate_boundaries": false,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["주식회사"]
+      }
+    },
+    {
+      "id": "rest-api-consensus-scroll-track",
+      "label": "Rest API prerequisite keeps its canonical text while scrolling",
+      "start_seconds": 126.0,
+      "end_seconds": 166.8,
+      "evaluate_boundaries": false,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["Rest API"]
+      },
+      "keyframes": [
+        {
+          "timestamp_seconds": 126.0,
+          "bbox": {
+            "x": 0.2625,
+            "y": 0.8138888888888889,
+            "width": 0.28229166666666666,
+            "height": 0.025925925925925797
+          }
+        },
+        {
+          "timestamp_seconds": 140.4,
+          "bbox": {
+            "x": 0.2625,
+            "y": 0.6675925925925925,
+            "width": 0.28229166666666666,
+            "height": 0.025000000000000022
+          }
+        },
+        {
+          "timestamp_seconds": 159.0,
+          "bbox": {
+            "x": 0.2630208333333333,
+            "y": 0.5888888888888889,
+            "width": 0.28124999999999994,
+            "height": 0.02314814814814814
+          }
+        }
+      ]
+    },
+    {
+      "id": "json-consensus-scroll-track",
+      "label": "JSON prerequisite keeps its canonical identifier while scrolling",
+      "start_seconds": 126.0,
+      "end_seconds": 166.8,
+      "evaluate_boundaries": false,
+      "match": {
+        "field": "source_text",
+        "mode": "contains",
+        "patterns": ["JSON"]
+      },
+      "keyframes": [
+        {
+          "timestamp_seconds": 126.0,
+          "bbox": {
+            "x": 0.2625,
+            "y": 0.8435185185185186,
+            "width": 0.24921875,
+            "height": 0.02314814814814814
+          }
+        },
+        {
+          "timestamp_seconds": 140.4,
+          "bbox": {
+            "x": 0.26276041666666666,
+            "y": 0.6981481481481482,
+            "width": 0.24869791666666669,
+            "height": 0.025000000000000022
+          }
+        },
+        {
+          "timestamp_seconds": 159.0,
+          "bbox": {
+            "x": 0.2635416666666667,
+            "y": 0.6175925925925926,
+            "width": 0.24791666666666667,
+            "height": 0.022222222222222254
           }
         }
       ]

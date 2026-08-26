@@ -78,6 +78,11 @@ reuses approved v1 translations, records hold/linear bbox keyframes, and renders
 decoded-frame media time. The corrected source-frame benchmark passes all temporal gates on
 0.mp4. See docs/m3.3-region-text-tracks.md.
 
+M3.4 adds translation-anchored OCR consensus, event-backed track closure, repeatable disjoint
+OCR windows, and absence-aware temporal gates. On `0.mp4`, it removes the stale intro-logo overlay,
+preserves `OpenAI`, `Rest API`, and `JSON`, and passes all six annotations and eighteen audited
+keyframes. See docs/m3.4-quality-foundation.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 

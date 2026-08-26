@@ -29,6 +29,22 @@ def test_required_commands_are_registered() -> None:
         assert namespace.command == command
 
 
+def test_track_regions_parses_repeatable_include_windows() -> None:
+    namespace = build_parser().parse_args(
+        [
+            "track-regions",
+            "tracks.json",
+            "visual-events.json",
+            "--include-window",
+            "8:9.4",
+            "--include-window",
+            "120:166.8",
+        ]
+    )
+
+    assert namespace.include_window == [(8.0, 9.4), (120.0, 166.8)]
+
+
 def test_render_tracks_command_writes_viewer_and_editor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

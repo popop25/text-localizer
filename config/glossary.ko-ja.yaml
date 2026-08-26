@@ -45,6 +45,8 @@ entries:
     target: Multi-Agent
   - source: Agent
     target: Agent
+  - source: AI Agent
+    target: AI Agent
   - source: Introduction
     target: Introduction
   - source: Learning Objectives
@@ -73,10 +75,22 @@ entries:
       - "[실]"
   - source: 실습
     target: 演習
+  - source: 실전
+    target: 実践
   - source: 과제
     target: 課題
+  - source: 나만의
+    target: 自分だけの
   - source: 기초
     target: 基礎
+  - source: 활용법
+    target: 活用方法
+  - source: 구현
+    target: 実装
+  - source: 핵심 요소 이해
+    target: 主要要素を理解する
+    aliases:
+      - 핵심요소이해
   - source: 개발 방법 학습
     target: 開発方法の学習
     aliases:

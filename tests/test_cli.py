@@ -20,14 +20,35 @@ def test_required_commands_are_registered() -> None:
         "index-visual-events": ["index-visual-events", "placeholder"],
         "track-regions": ["track-regions", "tracks.json", "visual-events.json"],
         "style-regions": ["style-regions", "tracks.json"],
+        "retranslate-tracks": ["retranslate-tracks", "tracks.json"],
         "render-tracks": ["render-tracks", "placeholder"],
         "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
+        "evaluate-translations": [
+            "evaluate-translations",
+            "tracks.json",
+            "benchmark.json",
+        ],
+        "benchmark-translator": ["benchmark-translator", "benchmark.json"],
         "setup-models": ["setup-models", "--ocr"],
         "render-video": ["render-video", "placeholder"],
     }
     for command, arguments in command_arguments.items():
         namespace = parser.parse_args(arguments)
         assert namespace.command == command
+
+
+def test_translation_commands_default_to_quality_selected_provider() -> None:
+    parser = build_parser()
+
+    for arguments in (
+        ["analyze-image", "frame.png"],
+        ["localize-video", "video.mp4"],
+        ["retranslate-tracks", "tracks.json"],
+        ["benchmark-translator", "benchmark.json"],
+        ["setup-models", "--translation"],
+    ):
+        namespace = parser.parse_args(arguments)
+        assert namespace.translation_provider == "gemma3-270m"
 
 
 def test_track_regions_parses_repeatable_include_windows() -> None:

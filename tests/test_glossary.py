@@ -112,6 +112,16 @@ def test_unprotected_hangul_still_requires_full_sentence_translation() -> None:
     assert prepared.requires_model_translation is True
 
 
+def test_course_domain_terms_are_protected_without_hardcoding_full_sentences() -> None:
+    glossary = Glossary.from_yaml(Path(__file__).parents[1] / "config" / "glossary.ko-ja.yaml")
+
+    prepared = glossary.prepare("실전 활용법과 AI Agent 구현, 나만의 핵심요소이해")
+    restored, flags = glossary.restore(prepared.protected_text, prepared)
+
+    assert restored == "実践 活用方法과 AI Agent 実装, 自分だけの 主要要素を理解する"
+    assert flags == ()
+
+
 def test_course_glossary_resolves_recurring_langchain_label_variants() -> None:
     glossary = Glossary.from_yaml(Path(__file__).parents[1] / "config" / "glossary.ko-ja.yaml")
     sources = (

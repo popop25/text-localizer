@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "name": "0.mp4 Korean to Japanese translation quality",
+  "ground_truth": {
+    "revision": 1,
+    "source": "Human-reviewed representative region tracks from 0.mp4",
+    "scope": "Meaning, terminology preservation, and obvious mistranslation checks"
+  },
+  "gates": {
+    "minimum_case_pass_rate": 0.9,
+    "minimum_check_pass_rate": 0.95,
+    "maximum_missing_cases": 0,
+    "maximum_forbidden_hits": 0,
+    "maximum_hangul_cases": 0
+  },
+  "cases": [
+    {
+      "id": "course-title",
+      "label": "Course title uses the training sense of practical",
+      "source_text": "Azure OpenAI & LangChain 실전",
+      "reference_translation": "Azure OpenAI & LangChain 実践",
+      "required_all": ["実践"],
+      "required_any": [],
+      "forbidden": ["実行"],
+      "preserved_terms": ["Azure OpenAI", "LangChain"]
+    },
+    {
+      "id": "course-purpose",
+      "label": "Enterprise LLM development purpose",
+      "source_text": "#기업용 LLM 서비스 개발을 위한핵심 기술 학습",
+      "reference_translation": "#企業向けLLMサービス開発のための主要技術を学習",
+      "required_all": ["企業向け", "LLM", "サービス", "開発", "技術", "学習"],
+      "required_any": [["主要", "中核", "核心"]],
+      "forbidden": ["ビジネスのためのLLMサービス開発のための"],
+      "preserved_terms": ["LLM"]
+    },
+    {
+      "id": "course-overview",
+      "label": "Course overview preserves practical usage and application construction",
+      "source_text": "이 강의에서는 AzureOpenAI 의 기본개념과실전 활용법을 배우고, LangChain 을 활용하여 더욱발전된 AI 애플리케이션을 구축하는 방법을 익힙니다.",
+      "reference_translation": "この講義では、Azure OpenAIの基本概念と実践的な活用方法を学び、LangChainを活用して、より高度なAIアプリケーションを構築する方法を身につけます。",
+      "required_all": ["基本", "活用", "AI", "アプリケーション", "構築"],
+      "required_any": [["実践", "実用"]],
+      "forbidden": ["実用化"],
+      "preserved_terms": ["AzureOpenAI", "LangChain", "AI"]
+    },
+    {
+      "id": "hands-on-agent-implementation",
+      "label": "Hands-on sentence describes implementing an agent",
+      "source_text": "Hands-on 실습을통해 OpenAI API 를직접 활용해보고, LangChain 과 LangGraph 를 사용하여 엔터프라이즈환경에서활용 가능한 AI Agent 를 구현하는경험을쌓을수있습니다",
+      "reference_translation": "Hands-on演習を通じてOpenAI APIを直接活用し、LangChainとLangGraphを使ってエンタープライズ環境で利用可能なAI Agentを実装する経験を積むことができます。",
+      "required_all": ["演習", "エンタープライズ", "実装", "経験"],
+      "required_any": [["活用", "利用"]],
+      "forbidden": ["Agentを実施", "Agent を実施"],
+      "preserved_terms": ["Hands-on", "OpenAI API", "LangChain", "LangGraph", "AI Agent"]
+    },
+    {
+      "id": "learning-objective-openai",
+      "label": "OpenAI learning objective",
+      "source_text": "Azure OpenAI 와 OpenAI API 의 기본개념과활용법 이해",
+      "reference_translation": "Azure OpenAIとOpenAI APIの基本概念と活用方法を理解する",
+      "required_all": ["基本概念", "理解"],
+      "required_any": [["活用方法", "利用方法"]],
+      "forbidden": [],
+      "preserved_terms": ["Azure OpenAI", "OpenAI API"]
+    },
+    {
+      "id": "learning-objective-langchain",
+      "label": "LangChain objective retains principal elements and understanding",
+      "source_text": "주로쓰이는 LangChain 의핵심요소이해",
+      "reference_translation": "LangChainで主に使われる主要要素を理解する",
+      "required_all": ["LangChain", "要素", "理解"],
+      "required_any": [["主に", "主な"], ["主要", "核心"]],
+      "forbidden": ["タイトル"],
+      "preserved_terms": ["LangChain"]
+    },
+    {
+      "id": "learning-objective-langgraph",
+      "label": "LangGraph agent development objective",
+      "source_text": "√ LangGraph 기반 Agent 개발 방법 학습",
+      "reference_translation": "✓ LangGraphベースのAgent開発方法を学習する",
+      "required_all": ["LangGraph", "Agent", "開発方法", "学習"],
+      "required_any": [],
+      "forbidden": [],
+      "preserved_terms": ["LangGraph", "Agent"]
+    },
+    {
+      "id": "enterprise-considerations",
+      "label": "Enterprise service considerations objective",
+      "source_text": "기업용 서비스 개발 시 고려할 점 이해",
+      "reference_translation": "企業向けサービス開発時の考慮事項を理解する",
+      "required_all": ["企業向け", "サービス", "開発", "考慮", "理解"],
+      "required_any": [],
+      "forbidden": ["ビジネス開発について考える"],
+      "preserved_terms": []
+    },
+    {
+      "id": "openai-api-tour",
+      "label": "OpenAI API tour curriculum item",
+      "source_text": "2 OpenAI API 둘러보기",
+      "reference_translation": "2 OpenAI APIを見てみる",
+      "required_all": ["見てみる"],
+      "required_any": [],
+      "forbidden": [],
+      "preserved_terms": ["OpenAI API"]
+    },
+    {
+      "id": "multi-agent-assignment",
+      "label": "Personal multi-agent development assignment",
+      "source_text": "8 [과제] 나만의 Multi Agent 개발",
+      "reference_translation": "8 [課題] 自分だけのMulti Agentを開発",
+      "required_all": ["課題", "開発"],
+      "required_any": [["自分", "オリジナル"]],
+      "forbidden": ["私自身の"],
+      "preserved_terms": ["Multi Agent"]
+    },
+    {
+      "id": "prerequisites-heading",
+      "label": "Prerequisites heading",
+      "source_text": "4.사전 준비 사항(Prerequisites)",
+      "reference_translation": "4.事前準備事項(Prerequisites)",
+      "required_all": ["事前準備"],
+      "required_any": [["事項", "要件"]],
+      "forbidden": ["原則"],
+      "preserved_terms": ["Prerequisites"]
+    },
+    {
+      "id": "python-prerequisite",
+      "label": "Python and Jupyter prerequisite experience",
+      "source_text": "^Python 및 Jupyter Notebook 활용경험이 있으면 학습이 더 원활합니다.",
+      "reference_translation": "^PythonおよびJupyter Notebookの活用経験があると、より円滑に学習できます。",
+      "required_all": ["経験", "学習"],
+      "required_any": [["活用", "利用", "使用"], ["円滑", "スムーズ", "順調"]],
+      "forbidden": [],
+      "preserved_terms": ["Python", "Jupyter Notebook"]
+    },
+    {
+      "id": "rest-api-prerequisite",
+      "label": "REST API and LLM prerequisite understanding",
+      "source_text": "Rest API 사용경험및 LLM 기본개념에대한이해가 있으면 학습이 원활합니다.",
+      "reference_translation": "Rest APIの使用経験とLLMの基本概念に対する理解があると、円滑に学習できます。",
+      "required_all": ["使用経験", "基本概念", "理解", "学習"],
+      "required_any": [["円滑", "スムーズ", "順調"]],
+      "forbidden": [],
+      "preserved_terms": ["Rest API", "LLM"]
+    },
+    {
+      "id": "json-prerequisite",
+      "label": "Basic JSON data-processing prerequisite",
+      "source_text": "기본적인데이터 처리개념(JSON 등) 이 있으면 학습에 도움이 됩니다.",
+      "reference_translation": "基本的なデータ処理の概念（JSONなど）があると、学習に役立ちます。",
+      "required_all": ["基本", "データ処理", "概念", "学習", "役立"],
+      "required_any": [],
+      "forbidden": ["コンセプト"],
+      "preserved_terms": ["JSON"]
+    }
+  ]
+}

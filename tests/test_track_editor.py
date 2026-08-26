@@ -67,6 +67,9 @@ def test_track_editor_contains_edit_review_time_and_export_controls(tmp_path: Pa
     assert "tracks.edited.json" in html
     assert "human_edited" in html
     assert video_path.resolve().as_uri() in html
+    assert "requestVideoFrameCallback" in html
+    assert "renderPreview(metadata.mediaTime)" in html
+    assert "requestAnimationFrame" in html
 
 
 def test_track_manifest_rejects_non_contiguous_ranges() -> None:

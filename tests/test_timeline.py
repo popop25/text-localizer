@@ -120,6 +120,10 @@ def test_timeline_analyzes_only_unique_scene_representatives(tmp_path: Path) -> 
     assert (output_dir / "editor.html").is_file()
     assert "maximum bracket width" in (output_dir / "viewer.html").read_text(encoding="utf-8")
     assert "region.needs_review" in (output_dir / "viewer.html").read_text(encoding="utf-8")
+    viewer_html = (output_dir / "viewer.html").read_text(encoding="utf-8")
+    assert "requestVideoFrameCallback" in viewer_html
+    assert "metadata.mediaTime" in viewer_html
+    assert "requestAnimationFrame" in viewer_html
 
 
 def test_timeline_resume_reuses_existing_scene_analyses(tmp_path: Path) -> None:

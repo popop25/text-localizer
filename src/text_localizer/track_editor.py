@@ -176,12 +176,23 @@ def write_track_editor(
     const status = document.getElementById("status");
     const overlayToggle = document.getElementById("overlay-toggle");
     let selectedIndex = 0;
+    let activePreviewTrackId = null;
+    let fallbackFrameRequest = null;
+    let videoFrameCallbackActive = false;
 
     function selectedTrack() {{ return manifest.tracks[selectedIndex]; }}
     function clamp(value, minimum, maximum) {{
       return Math.min(maximum, Math.max(minimum, value));
     }}
     function setStatus(message) {{ status.textContent = message; }}
+
+    function findTrack(time) {{
+      return manifest.tracks.find((item, index) =>
+        time >= item.start_seconds &&
+        (time < item.end_seconds ||
+          (index === manifest.tracks.length - 1 && time <= item.end_seconds))
+      );
+    }}
 
     function rebuildTrackOptions() {{
       select.replaceChildren();
@@ -213,6 +224,39 @@ def write_track_editor(
       }});
     }}
 
+    function renderPreview(mediaTime = video.currentTime, force = false) {{
+      const track = findTrack(mediaTime) || selectedTrack();
+      const nextTrackId = track ? track.track_id : null;
+      if (!force && nextTrackId === activePreviewTrackId) return;
+      activePreviewTrackId = nextTrackId;
+      renderOverlays(track);
+    }}
+
+    function startVideoFrameClock() {{
+      if (videoFrameCallbackActive ||
+          typeof video.requestVideoFrameCallback !== "function") return;
+      videoFrameCallbackActive = true;
+      const onVideoFrame = (_now, metadata) => {{
+        renderPreview(metadata.mediaTime);
+        video.requestVideoFrameCallback(onVideoFrame);
+      }};
+      video.requestVideoFrameCallback(onVideoFrame);
+    }}
+
+    function startFallbackFrameClock() {{
+      if (typeof video.requestVideoFrameCallback === "function" ||
+          fallbackFrameRequest !== null) return;
+      const onAnimationFrame = () => {{
+        renderPreview(video.currentTime);
+        if (video.paused || video.ended) {{
+          fallbackFrameRequest = null;
+          return;
+        }}
+        fallbackFrameRequest = requestAnimationFrame(onAnimationFrame);
+      }};
+      fallbackFrameRequest = requestAnimationFrame(onAnimationFrame);
+    }}
+
     function renderRegions() {{
       const track = selectedTrack();
       regionsNode.replaceChildren();
@@ -236,7 +280,7 @@ def write_track_editor(
         target.addEventListener("input", () => {{
           region.translated_text = target.value;
           region.human_edited = true;
-          renderOverlays(track);
+          renderPreview(video.currentTime, true);
           setStatus("Unsaved edits");
         }});
         const approve = document.createElement("label");
@@ -250,7 +294,7 @@ def write_track_editor(
           region.needs_review = !checkbox.checked;
           region.human_reviewed = checkbox.checked;
           card.classList.toggle("review", region.needs_review);
-          renderOverlays(track);
+          renderPreview(video.currentTime, true);
           setStatus("Unsaved review change");
         }});
         approve.append(checkbox, approveText);
@@ -272,8 +316,8 @@ def write_track_editor(
       startInput.disabled = selectedIndex === 0;
       endInput.disabled = selectedIndex === manifest.tracks.length - 1;
       renderRegions();
-      renderOverlays(track);
       if (seek) video.currentTime = track.start_seconds;
+      renderPreview(video.currentTime, true);
     }}
 
     function updateTimes() {{
@@ -335,7 +379,7 @@ def write_track_editor(
     }});
     startInput.addEventListener("change", updateTimes);
     endInput.addEventListener("change", updateTimes);
-    overlayToggle.addEventListener("change", () => renderOverlays(selectedTrack()));
+    overlayToggle.addEventListener("change", () => renderPreview(video.currentTime, true));
     document.getElementById("export").addEventListener("click", exportManifest);
     document.getElementById("import").addEventListener("change", async event => {{
       const file = event.target.files?.[0];
@@ -351,8 +395,17 @@ def write_track_editor(
         setStatus("Import failed: invalid track JSON");
       }}
     }});
-    video.addEventListener("seeked", () => renderOverlays(selectedTrack()));
-    window.addEventListener("resize", () => renderOverlays(selectedTrack()));
+    video.addEventListener("loadedmetadata", () => {{
+      renderPreview();
+      startVideoFrameClock();
+    }});
+    video.addEventListener("play", startFallbackFrameClock);
+    video.addEventListener("timeupdate", () => {{
+      if (typeof video.requestVideoFrameCallback !== "function") renderPreview();
+    }});
+    video.addEventListener("seeked", () => renderPreview(video.currentTime, true));
+    video.addEventListener("pause", () => renderPreview());
+    window.addEventListener("resize", () => renderPreview(video.currentTime, true));
     video.src = videoSource;
     renderSelected(false);
   </script>

@@ -60,6 +60,8 @@ def write_video_viewer(
     const precision = document.getElementById("precision");
     const review = document.getElementById("review");
     let activeTrackId = null;
+    let fallbackFrameRequest = null;
+    let videoFrameCallbackActive = false;
 
     function formatTime(value) {{
       const minutes = Math.floor(value / 60).toString().padStart(2, "0");
@@ -93,19 +95,52 @@ def write_video_viewer(
       }}
     }}
 
-    function update() {{
-      const track = findTrack(video.currentTime);
+    function update(mediaTime = video.currentTime) {{
+      const track = findTrack(mediaTime);
       const nextTrackId = track ? track.track_id : null;
       if (nextTrackId !== activeTrackId) {{
         activeTrackId = nextTrackId;
         render(track);
       }}
-      status.textContent = `${{formatTime(video.currentTime)}} · ${{nextTrackId || "no scene"}}`;
+      status.textContent = `${{formatTime(mediaTime)}} · ${{nextTrackId || "no scene"}}`;
+    }}
+
+    function startVideoFrameClock() {{
+      if (videoFrameCallbackActive ||
+          typeof video.requestVideoFrameCallback !== "function") return;
+      videoFrameCallbackActive = true;
+      const onVideoFrame = (_now, metadata) => {{
+        update(metadata.mediaTime);
+        video.requestVideoFrameCallback(onVideoFrame);
+      }};
+      video.requestVideoFrameCallback(onVideoFrame);
+    }}
+
+    function startFallbackFrameClock() {{
+      if (typeof video.requestVideoFrameCallback === "function" ||
+          fallbackFrameRequest !== null) return;
+      const onAnimationFrame = () => {{
+        update(video.currentTime);
+        if (video.paused || video.ended) {{
+          fallbackFrameRequest = null;
+          return;
+        }}
+        fallbackFrameRequest = requestAnimationFrame(onAnimationFrame);
+      }};
+      fallbackFrameRequest = requestAnimationFrame(onAnimationFrame);
     }}
 
     toggle.addEventListener("change", () => render(findTrack(video.currentTime)));
-    video.addEventListener("timeupdate", update);
-    video.addEventListener("seeked", update);
+    video.addEventListener("loadedmetadata", () => {{
+      update();
+      startVideoFrameClock();
+    }});
+    video.addEventListener("play", startFallbackFrameClock);
+    video.addEventListener("timeupdate", () => {{
+      if (typeof video.requestVideoFrameCallback !== "function") update();
+    }});
+    video.addEventListener("seeked", () => update());
+    video.addEventListener("pause", () => update());
     window.addEventListener("resize", () => render(findTrack(video.currentTime)));
     review.textContent = manifest.metrics.needs_review_count
       ? `${{manifest.metrics.needs_review_count}} review flag(s)`

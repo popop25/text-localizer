@@ -64,6 +64,10 @@ interval coverage, keyframe recall, boundary error, spatial IoU, and flicker. Th
 0.mp4 baseline proves that hard scene transitions are already precise while scrolling text
 needs independent region tracking. See docs/m3.0-temporal-quality-benchmark.md.
 
+M3.1 drives the generated viewer and editor preview from decoded video-frame media time,
+with an animation-frame fallback for older browsers. It removes playback-clock lag while
+leaving the failing region-tracking benchmark visible. See docs/m3.1-frame-synced-viewer.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 

@@ -107,6 +107,8 @@ def _validate_region_tracks(manifest: dict[str, Any], duration: float) -> int:
         review_count += int(region["needs_review"])
         if "overlay_style" in raw_track:
             _validate_overlay_style(raw_track.get("overlay_style"), track_id)
+        if "overlay_layout" in raw_track:
+            _validate_overlay_layout(raw_track.get("overlay_layout"), track_id, region)
 
         keyframes = raw_track.get("keyframes")
         if not isinstance(keyframes, list) or not keyframes:
@@ -494,7 +496,10 @@ def _validate_region(raw: Any, track_id: str, region_index: int) -> None:
 def _validate_overlay_style(raw: Any, track_id: str) -> None:
     if not isinstance(raw, dict):
         raise ValueError(f"Region track {track_id} overlay_style must be a mapping.")
-    if raw.get("schema_version") != 1 or raw.get("algorithm") != "source-palette-v1":
+    if raw.get("schema_version") != 1 or raw.get("algorithm") not in {
+        "source-palette-v1",
+        "source-palette-v2",
+    }:
         raise ValueError(f"Region track {track_id} overlay_style has an unsupported schema.")
     for field in ("foreground_color", "background_color"):
         value = raw.get(field)
@@ -534,6 +539,76 @@ def _validate_overlay_style(raw: Any, track_id: str) -> None:
         raise ValueError(
             f"Region track {track_id} overlay_style fallback reason does not match its state."
         )
+    if raw.get("algorithm") == "source-palette-v2" and not raw.get("fallback_used"):
+        glyph_height_ratio = _number(
+            raw.get("glyph_height_ratio"),
+            f"Region track {track_id} overlay_style glyph_height_ratio",
+        )
+        if not 0.0 < glyph_height_ratio <= 1.0:
+            raise ValueError(
+                f"Region track {track_id} overlay_style glyph_height_ratio is out of range."
+            )
+        if raw.get("glyph_height_method") != "column-span-p80-v1":
+            raise ValueError(
+                f"Region track {track_id} overlay_style glyph_height_method is invalid."
+            )
+
+
+def _validate_overlay_layout(raw: Any, track_id: str, region: dict[str, Any]) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(f"Region track {track_id} overlay_layout must be a mapping.")
+    if raw.get("schema_version") != 1 or raw.get("algorithm") != "adaptive-fit-v1":
+        raise ValueError(f"Region track {track_id} overlay_layout has an unsupported schema.")
+    translated = region.get("translated_text")
+    expected_text = (
+        translated.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if isinstance(translated, str)
+        else None
+    )
+    if not expected_text or raw.get("text") != expected_text:
+        raise ValueError(f"Region track {track_id} overlay_layout text is stale or invalid.")
+    digest = raw.get("text_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError(f"Region track {track_id} overlay_layout text_sha256 is invalid.")
+    lines = raw.get("lines")
+    if (
+        not isinstance(lines, list)
+        or not lines
+        or any(not isinstance(line, str) for line in lines)
+        or re.sub(r"\s+", "", "".join(lines)) != re.sub(r"\s+", "", expected_text)
+    ):
+        raise ValueError(f"Region track {track_id} overlay_layout lines are invalid.")
+    line_count = raw.get("line_count")
+    if isinstance(line_count, bool) or not isinstance(line_count, int) or line_count != len(lines):
+        raise ValueError(f"Region track {track_id} overlay_layout line_count is invalid.")
+    if raw.get("fit_strategy") not in {"source-box", "expand", "wrap", "shrink", "review"}:
+        raise ValueError(f"Region track {track_id} overlay_layout fit_strategy is invalid.")
+    for field, minimum, maximum in (
+        ("source_font_size_ratio", 0.0, 1.0),
+        ("resolved_font_size_ratio", 0.0, 1.0),
+        ("font_scale", 0.1, 1.0),
+        ("line_height", 0.8, 2.0),
+        ("padding_x_ratio", 0.0, 0.1),
+        ("padding_y_ratio", 0.0, 0.1),
+        ("left_extension_ratio", 0.0, 1.0),
+        ("right_extension_ratio", 0.0, 1.0),
+        ("top_extension_ratio", 0.0, 1.0),
+        ("bottom_extension_ratio", 0.0, 1.0),
+        ("target_width_ratio", 0.0, 1.0),
+        ("target_height_ratio", 0.0, 1.0),
+    ):
+        value = _number(raw.get(field), f"Region track {track_id} overlay_layout {field}")
+        positive_fields = {
+            "source_font_size_ratio",
+            "resolved_font_size_ratio",
+            "target_width_ratio",
+            "target_height_ratio",
+        }
+        if value < minimum or value > maximum or (field in positive_fields and value == 0.0):
+            raise ValueError(f"Region track {track_id} overlay_layout {field} is out of range.")
+    for field in ("content_fits", "layout_needs_review"):
+        if not isinstance(raw.get(field), bool):
+            raise ValueError(f"Region track {track_id} overlay_layout {field} must be boolean.")
 
 
 def _validate_bbox(raw: Any, label: str) -> None:

@@ -153,6 +153,7 @@ text-localizer localize-video data\input\sample.mp4 --profile config\profiles\br
 text-localizer track-regions data\output\sample-timeline\tracks.json data\work\sample-visual-events\visual-events.json --profile config\profiles\browser-lecture.yaml
 text-localizer style-regions data\output\sample-region-tracks\tracks.json --output data\output\sample-styled
 text-localizer retranslate-tracks data\output\sample-styled\tracks.json --output data\output\sample-retranslated
+text-localizer layout-regions data\output\sample-retranslated\tracks.json --output data\output\sample-laid-out --require-pass
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
 text-localizer evaluate-translations data\output\sample-retranslated\tracks.json config\benchmarks\0-translation-quality.json
@@ -163,7 +164,8 @@ text-localizer render-video data\output\sample-timeline\tracks.edited.json --out
 `analyze-image`, `localize-video`, `retranslate-tracks`, and `benchmark-translator` default to
 `gemma3-270m`. Pass `--translation-provider m2m100` for a controlled comparison or compatibility
 run. `retranslate-tracks` changes only canonical schema-v2 translations; OCR observations,
-region keyframes, and adaptive overlay styles are retained exactly.
+region keyframes, and adaptive overlay styles are retained exactly. It invalidates any prior
+text-layout plan because the translated string has changed; run `layout-regions` again afterward.
 
 For a screen recording, restrict OCR to the content area and optionally exclude content
 inside that area. Coordinates are normalized `x,y,width,height` values against the full

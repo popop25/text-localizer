@@ -13,6 +13,7 @@ from text_localizer.domain import NormalizedBox
 from text_localizer.environment import run_doctor
 from text_localizer.glossary import Glossary
 from text_localizer.logging_config import configure_logging
+from text_localizer.overlay_layout import OverlayLayoutOptions, layout_region_tracks
 from text_localizer.overlay_style import OverlayStyleOptions, style_region_tracks
 from text_localizer.pipeline import analyze_static_image
 from text_localizer.profile import (
@@ -243,6 +244,22 @@ def build_parser() -> argparse.ArgumentParser:
     style_regions.add_argument("--background-padding-ratio", type=float, default=0.35)
     style_regions.add_argument("--minimum-contrast-ratio", type=float, default=3.0)
     style_regions.add_argument("--minimum-style-confidence", type=float, default=0.45)
+
+    layout_regions = subparsers.add_parser(
+        "layout-regions",
+        help="Fit translated text to schema-v2 source regions without silent clipping",
+    )
+    layout_regions.add_argument("path", type=Path, help="Schema-v2 tracks JSON")
+    layout_regions.add_argument("--output", type=Path)
+    layout_regions.add_argument("--maximum-width-scale", type=float, default=1.8)
+    layout_regions.add_argument("--maximum-frame-width-ratio", type=float, default=0.6)
+    layout_regions.add_argument("--maximum-lines", type=int, default=2)
+    layout_regions.add_argument("--minimum-font-scale", type=float, default=0.8)
+    layout_regions.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Return a non-zero status when a layout quality gate fails",
+    )
 
     retranslate_tracks = subparsers.add_parser(
         "retranslate-tracks",
@@ -620,6 +637,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+
+        if args.command == "layout-regions":
+            output = args.output or args.path.parent / "laid-out-region-tracks"
+            manifest = layout_region_tracks(
+                args.path,
+                output,
+                options=OverlayLayoutOptions(
+                    maximum_width_scale=args.maximum_width_scale,
+                    maximum_frame_width_ratio=args.maximum_frame_width_ratio,
+                    maximum_lines=args.maximum_lines,
+                    minimum_font_scale=args.minimum_font_scale,
+                ),
+            )
+            summary = manifest["region_layout"]
+            print(
+                json.dumps(
+                    {
+                        "tracks": str((output / "tracks.json").resolve()),
+                        "viewer": str((output / "viewer.html").resolve()),
+                        "layout_quality": str((output / "layout-quality.json").resolve()),
+                        "region_layout": summary,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            if args.require_pass and not summary["gates_passed"]:
+                return 1
             return 0
 
         if args.command == "retranslate-tracks":

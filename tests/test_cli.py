@@ -20,6 +20,7 @@ def test_required_commands_are_registered() -> None:
         "index-visual-events": ["index-visual-events", "placeholder"],
         "track-regions": ["track-regions", "tracks.json", "visual-events.json"],
         "style-regions": ["style-regions", "tracks.json"],
+        "layout-regions": ["layout-regions", "tracks.json"],
         "retranslate-tracks": ["retranslate-tracks", "tracks.json"],
         "render-tracks": ["render-tracks", "placeholder"],
         "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
@@ -84,6 +85,30 @@ def test_style_regions_parses_quality_thresholds() -> None:
     assert namespace.background_padding_ratio == 0.5
     assert namespace.minimum_contrast_ratio == 4.5
     assert namespace.minimum_style_confidence == 0.6
+
+
+def test_layout_regions_parses_fit_policy() -> None:
+    namespace = build_parser().parse_args(
+        [
+            "layout-regions",
+            "tracks.json",
+            "--maximum-width-scale",
+            "1.4",
+            "--maximum-frame-width-ratio",
+            "0.5",
+            "--maximum-lines",
+            "2",
+            "--minimum-font-scale",
+            "0.82",
+            "--require-pass",
+        ]
+    )
+
+    assert namespace.maximum_width_scale == 1.4
+    assert namespace.maximum_frame_width_ratio == 0.5
+    assert namespace.maximum_lines == 2
+    assert namespace.minimum_font_scale == 0.82
+    assert namespace.require_pass is True
 
 
 def test_render_tracks_command_writes_viewer_and_editor(

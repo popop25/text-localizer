@@ -116,6 +116,22 @@ def test_estimate_overlay_style_falls_back_without_foreground() -> None:
     assert style["background_opacity"] == 1.0
 
 
+def test_estimate_overlay_style_ignores_tall_decorative_icon() -> None:
+    image = Image.new("RGB", (300, 100), (30, 30, 30))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((34, 31, 40, 58), fill=(220, 220, 220))
+    draw.rectangle((50, 39, 245, 52), fill=(220, 220, 220))
+
+    style = estimate_overlay_style(
+        image,
+        {"x": 0.1, "y": 0.3, "width": 0.75, "height": 0.3},
+    )
+
+    assert style["algorithm"] == "source-palette-v2"
+    assert style["glyph_height_method"] == "column-span-p80-v1"
+    assert 0.15 <= style["font_size_ratio"] <= 0.2
+
+
 def test_style_region_tracks_writes_valid_manifest_and_adaptive_viewer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -154,8 +170,8 @@ def test_style_region_tracks_writes_valid_manifest_and_adaptive_viewer(
     viewer = (output_dir / "viewer.html").read_text(encoding="utf-8")
     assert "style.background_color" in viewer
     assert "style.font_size_ratio" in viewer
-    assert "fitOverlayText(node)" in viewer
-    assert "source-palette-v1" in viewer
+    assert "fitOverlayText(node," in viewer
+    assert "source-palette-v2" in viewer
 
 
 def test_overlay_style_options_reject_invalid_thresholds() -> None:

@@ -50,6 +50,7 @@ def style_region_tracks(
         raise FileNotFoundError(f"Track source video does not exist: {video_path}")
 
     result = deepcopy(source_manifest)
+    result.pop("region_layout", None)
     raw_tracks = result.get("region_tracks")
     assert isinstance(raw_tracks, list)
     region_tracks = [cast(dict[str, Any], item) for item in raw_tracks]
@@ -65,6 +66,7 @@ def style_region_tracks(
     started = perf_counter()
 
     for track in region_tracks:
+        track.pop("overlay_layout", None)
         timestamp, bbox = _select_style_sample(track)
         timestamp_key = round(timestamp * 1_000_000)
         frame_record = frames.get(timestamp_key)
@@ -93,7 +95,7 @@ def style_region_tracks(
     reused_count = len(frames) - extracted_count
     result["region_styling"] = {
         "schema_version": 1,
-        "algorithm": "source-palette-v1",
+        "algorithm": "source-palette-v2",
         "sample_policy": "highest-confidence-stable-keyframe-v1",
         "video_size_bytes": video_stat.st_size,
         "video_modified_ns": video_stat.st_mtime_ns,
@@ -114,6 +116,9 @@ def style_region_tracks(
         "current_run_latency_ms": current_run_latency_ms,
     }
     metrics = cast(dict[str, Any], result["metrics"])
+    for key in tuple(metrics):
+        if str(key).startswith("layout_"):
+            metrics.pop(key)
     metrics["style_styled_region_track_count"] = len(region_tracks)
     metrics["style_fallback_count"] = fallback_count
     metrics["style_fixed_palette_fallback_count"] = fallback_count - sampled_palette_fallback_count
@@ -209,9 +214,8 @@ def estimate_overlay_style(
         foreground_adjusted = True
         confidence *= 0.85
 
-    foreground_top = min(item[1] for item in foreground)
-    foreground_bottom = max(item[1] for item in foreground) + 1
-    glyph_height_ratio = (foreground_bottom - foreground_top) / height
+    glyph_height = _robust_glyph_height(foreground)
+    glyph_height_ratio = glyph_height / height
     bbox_height_ratio = box_height / height
     font_size_ratio = min(
         bbox_height_ratio * 0.95,
@@ -231,7 +235,7 @@ def estimate_overlay_style(
 
     return {
         "schema_version": 1,
-        "algorithm": "source-palette-v1",
+        "algorithm": "source-palette-v2",
         "foreground_color": _hex_color(foreground_color),
         "background_color": _hex_color(background),
         "background_opacity": 1.0,
@@ -247,6 +251,8 @@ def estimate_overlay_style(
         "foreground_adjusted": foreground_adjusted,
         "fallback_used": False,
         "fallback_reason": None,
+        "glyph_height_ratio": glyph_height_ratio,
+        "glyph_height_method": "column-span-p80-v1",
     }
 
 
@@ -376,7 +382,7 @@ def _fallback_style(
     )
     return {
         "schema_version": 1,
-        "algorithm": "source-palette-v1",
+        "algorithm": "source-palette-v2",
         "foreground_color": _hex_color(foreground),
         "background_color": _hex_color(background),
         "background_opacity": 1.0 if use_sampled_palette else 0.88,
@@ -393,6 +399,20 @@ def _fallback_style(
         "fallback_used": True,
         "fallback_reason": reason,
     }
+
+
+def _robust_glyph_height(
+    foreground: list[tuple[int, int, tuple[int, int, int], float]],
+) -> float:
+    vertical_extents: dict[int, tuple[int, int]] = {}
+    for x, y, _color, _distance in foreground:
+        current = vertical_extents.get(x)
+        if current is None:
+            vertical_extents[x] = (y, y)
+        else:
+            vertical_extents[x] = (min(current[0], y), max(current[1], y))
+    spans = [float(bottom - top + 1) for top, bottom in vertical_extents.values()]
+    return max(1.0, _percentile(spans, 0.8))
 
 
 def _hex_color(color: tuple[int, int, int]) -> str:

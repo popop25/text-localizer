@@ -30,9 +30,10 @@ def write_video_viewer(
     video {{ display: block; width: 100%; height: auto; }}
     .overlay-layer {{ position: absolute; inset: 0; pointer-events: none; }}
     .overlay {{ position: absolute; box-sizing: border-box; display: flex;
-                align-items: center; overflow: hidden; padding: 2px 4px;
+                align-items: center; overflow: hidden; padding: 2px 4px; white-space: pre;
                 background: rgba(11, 13, 17, .88); color: white; line-height: 1.15;
                 border-radius: 2px; text-shadow: 0 1px 1px black; }}
+    .overlay.layout-review {{ outline: 2px solid #ffcb6b; overflow: visible; }}
     .notice {{ padding: .7rem 1rem; color: #aeb7c4; font-size: .9rem; }}
     .warning {{ color: #ffcb6b; }}
   </style>
@@ -104,7 +105,8 @@ def write_video_viewer(
           .filter(track => time >= track.start_seconds && time < track.end_seconds)
           .map(track => ({{ id: track.region_track_id, region: track.region,
                            bbox: regionTrackBox(track, time),
-                           style: track.overlay_style || null }}));
+                           style: track.overlay_style || null,
+                           layout: track.overlay_layout || null }}));
       }}
       const track = findTrack(time);
       return track ? track.regions.map((region, index) => ({{
@@ -136,20 +138,68 @@ def write_video_viewer(
       node.dataset.styleConfidence = style.confidence.toFixed(3);
     }}
 
-    function fitOverlayText(node) {{
-      const size = Number.parseFloat(node.style.fontSize);
-      if (!Number.isFinite(size)) return;
-      const minimum = Math.max(10, size * .68);
-      const widthRatio = node.scrollWidth > 0 ? node.clientWidth / node.scrollWidth : 1;
-      const heightRatio = node.scrollHeight > 0 ? node.clientHeight / node.scrollHeight : 1;
-      const fitRatio = Math.min(1, widthRatio, heightRatio);
-      if (fitRatio < 1)
-        node.style.fontSize = Math.max(minimum, size * fitRatio * .98) + "px";
+    function clamp(value, minimum, maximum) {{
+      return Math.min(maximum, Math.max(minimum, value));
+    }}
+
+    function applyOverlayLayout(node, layout, bbox) {{
+      const width = Math.min(1, bbox.width + layout.left_extension_ratio +
+        layout.right_extension_ratio);
+      const height = Math.min(1, bbox.height + layout.top_extension_ratio +
+        layout.bottom_extension_ratio);
+      const x = clamp(bbox.x - layout.left_extension_ratio, 0, Math.max(0, 1 - width));
+      const y = clamp(bbox.y - layout.top_extension_ratio, 0, Math.max(0, 1 - height));
+      node.style.fontSize = Math.max(
+        10, layout.resolved_font_size_ratio * video.clientHeight) + "px";
+      node.style.lineHeight = String(layout.line_height);
+      node.style.padding = `${{Math.max(1, layout.padding_y_ratio * video.clientHeight)}}px ` +
+        `${{Math.max(2, layout.padding_x_ratio * video.clientWidth)}}px`;
+      node.dataset.layoutStrategy = layout.fit_strategy;
+      node.dataset.layoutLines = String(layout.line_count);
+      return {{ x, y, width, height }};
+    }}
+
+    function overlayFits(node) {{
+      return node.scrollWidth <= node.clientWidth + 1 &&
+        node.scrollHeight <= node.clientHeight + 1;
+    }}
+
+    function fitOverlayText(node, minimumSize) {{
+      const preferred = Number.parseFloat(node.style.fontSize);
+      if (!Number.isFinite(preferred)) return false;
+      if (overlayFits(node)) return true;
+      const minimum = Math.min(preferred, Math.max(10, minimumSize));
+      node.style.fontSize = minimum + "px";
+      if (!overlayFits(node)) return false;
+      let low = minimum;
+      let high = preferred;
+      for (let iteration = 0; iteration < 9; iteration += 1) {{
+        const candidate = (low + high) / 2;
+        node.style.fontSize = candidate + "px";
+        if (overlayFits(node)) low = candidate;
+        else high = candidate;
+      }}
+      node.style.fontSize = low + "px";
+      node.dataset.runtimeFit = "binary-shrink";
+      return true;
+    }}
+
+    function updateReviewWarning(layoutReviewCount) {{
+      const messages = [];
+      if (manifest.metrics.needs_review_count)
+        messages.push(`${{manifest.metrics.needs_review_count}} translation review`);
+      if (layoutReviewCount)
+        messages.push(`${{layoutReviewCount}} layout review`);
+      review.textContent = messages.join(" · ");
     }}
 
     function render(time) {{
       layer.replaceChildren();
-      if (!toggle.checked) return;
+      if (!toggle.checked) {{
+        updateReviewWarning(0);
+        return;
+      }}
+      let layoutReviewCount = 0;
       for (const item of activeRegions(time)) {{
         const region = item.region;
         const bbox = item.bbox;
@@ -157,15 +207,27 @@ def write_video_viewer(
             !region.translated_text || region.needs_review) continue;
         const node = document.createElement("div");
         node.className = "overlay";
-        node.textContent = region.translated_text;
-        node.style.left = (bbox.x * 100) + "%";
-        node.style.top = (bbox.y * 100) + "%";
-        node.style.width = (bbox.width * 100) + "%";
-        node.style.height = (bbox.height * 100) + "%";
+        const normalizedText = region.translated_text.trim();
+        const layout = item.layout && item.layout.text === normalizedText
+          ? item.layout : null;
+        node.textContent = layout ? layout.lines.join("\n") : normalizedText;
         applyOverlayStyle(node, item.style, bbox);
+        const resolvedBox = layout ? applyOverlayLayout(node, layout, bbox) : bbox;
+        node.style.left = (resolvedBox.x * 100) + "%";
+        node.style.top = (resolvedBox.y * 100) + "%";
+        node.style.width = (resolvedBox.width * 100) + "%";
+        node.style.height = (resolvedBox.height * 100) + "%";
         layer.appendChild(node);
-        fitOverlayText(node);
+        const preferred = Number.parseFloat(node.style.fontSize);
+        const sourceSize = layout
+          ? layout.source_font_size_ratio * video.clientHeight : preferred;
+        const fits = fitOverlayText(node, Math.max(10, sourceSize * .8));
+        if (!fits || (layout && layout.layout_needs_review)) {{
+          node.classList.add("layout-review");
+          layoutReviewCount += 1;
+        }}
       }}
+      updateReviewWarning(layoutReviewCount);
     }}
 
     function update(mediaTime = video.currentTime) {{
@@ -218,14 +280,15 @@ def write_video_viewer(
     video.addEventListener("seeked", () => update());
     video.addEventListener("pause", () => update());
     window.addEventListener("resize", () => render(video.currentTime));
-    review.textContent = manifest.metrics.needs_review_count
-      ? `${{manifest.metrics.needs_review_count}} review flag(s)`
-      : "";
+    updateReviewWarning(0);
     precision.textContent = manifest.schema_version === 2
       ? `Region geometry uses ${{manifest.region_tracking.algorithm}} keyframes; ` +
         (manifest.region_styling
           ? `overlay palette uses ${{manifest.region_styling.algorithm}}; `
           : "overlay palette uses the fixed fallback; ") +
+        (manifest.region_layout
+          ? `text layout uses ${{manifest.region_layout.algorithm}}; `
+          : "text layout uses runtime box fitting; ") +
         `base scene bracket width is ${{manifest.sampling.transition_precision_seconds
           .toFixed(3)}} seconds.`
       : `Scene boundary estimate: maximum bracket width ` +

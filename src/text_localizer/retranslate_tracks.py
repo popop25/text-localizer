@@ -42,6 +42,10 @@ def retranslate_region_tracks(
     region_tracks = manifest.get("region_tracks")
     if not isinstance(region_tracks, list):
         raise ValueError("Schema-v2 manifest region_tracks must be a list.")
+    manifest.pop("region_layout", None)
+    for raw_track in region_tracks:
+        if isinstance(raw_track, dict):
+            raw_track.pop("overlay_layout", None)
 
     source_regions: dict[str, list[dict[str, Any]]] = {}
     for raw_track in region_tracks:
@@ -79,6 +83,9 @@ def retranslate_region_tracks(
     manifest["translation_glossary_fingerprint"] = glossary.fingerprint
     raw_metrics = manifest.get("metrics")
     metrics = cast(dict[str, Any], raw_metrics) if isinstance(raw_metrics, dict) else {}
+    for key in tuple(metrics):
+        if str(key).startswith("layout_"):
+            metrics.pop(key)
     metrics.update(
         {
             "needs_review_count": needs_review_count,

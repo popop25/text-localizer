@@ -11,7 +11,13 @@ def write_video_viewer(
     manifest: dict[str, Any],
 ) -> None:
     manifest_json = json.dumps(manifest, ensure_ascii=False).replace("<", "\\u003c")
-    video_json = json.dumps(video_path.resolve().as_uri()).replace("<", "\\u003c")
+    output_dir = output_path.resolve().parent
+    resolved_video = video_path.resolve()
+    try:
+        video_source = resolved_video.relative_to(output_dir).as_posix()
+    except ValueError:
+        video_source = resolved_video.as_uri()
+    video_json = json.dumps(video_source).replace("<", "\\u003c")
     html = f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -242,7 +248,7 @@ def write_video_viewer(
         const normalizedText = region.translated_text.trim();
         const layout = item.layout && item.layout.text === normalizedText
           ? item.layout : null;
-        node.textContent = layout ? layout.lines.join("\n") : normalizedText;
+        node.textContent = layout ? layout.lines.join("\\n") : normalizedText;
         applyOverlayStyle(node, item.style, bbox);
         if (item.replacement) node.style.backgroundColor = "transparent";
         const resolvedBox = layout ? applyOverlayLayout(node, layout, bbox) : bbox;

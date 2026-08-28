@@ -163,6 +163,7 @@ text-localizer style-regions data\output\sample-region-tracks\tracks.json --outp
 text-localizer retranslate-tracks data\output\sample-styled\tracks.json --output data\output\sample-retranslated
 text-localizer layout-regions data\output\sample-retranslated\tracks.json --output data\output\sample-laid-out --require-pass
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
+text-localizer serve-viewer data\output\sample-timeline
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
 text-localizer evaluate-replacement data\output\sample-laid-out\tracks.json config\benchmarks\0-replacement-quality.json --require-pass
 text-localizer evaluate-translations data\output\sample-retranslated\tracks.json config\benchmarks\0-translation-quality.json
@@ -234,6 +235,17 @@ loading PaddleOCR again. Prior model translations are reused only when the provi
 normalized source match and current quality checks still pass.
 After editing and exporting JSON in the browser, use `render-tracks` to validate the complete
 timeline and regenerate both HTML artifacts.
+
+Open generated video viewers through the loopback preview server so browsers can request MP4
+byte ranges without mixing an HTTP page with a `file://` media URL:
+
+```powershell
+text-localizer serve-viewer data\output\sample-timeline
+```
+
+Then open `http://127.0.0.1:8765/viewer.html`. The server binds only to a loopback IP address.
+When the source MP4 is inside the viewer output directory, generated HTML uses a relative media
+URL and remains portable with the directory.
 
 Once every review flag is resolved, burn the approved overlays into a separate MP4:
 

@@ -48,6 +48,7 @@ from text_localizer.translation_quality import (
 from text_localizer.video import extract_representative_frames, inspect_video
 from text_localizer.video_renderer import VideoRenderOptions, render_localized_video
 from text_localizer.video_viewer import write_video_viewer
+from text_localizer.viewer_server import serve_viewer
 from text_localizer.visual_events import index_video_visual_events
 
 
@@ -307,6 +308,13 @@ def build_parser() -> argparse.ArgumentParser:
     render_tracks.add_argument("path", type=Path)
     render_tracks.add_argument("--output", type=Path)
     render_tracks.add_argument("--video", type=Path)
+    serve_viewer_command = subparsers.add_parser(
+        "serve-viewer",
+        help="Serve a generated viewer and video over loopback HTTP with media seeking",
+    )
+    serve_viewer_command.add_argument("directory", type=Path)
+    serve_viewer_command.add_argument("--host", default="127.0.0.1")
+    serve_viewer_command.add_argument("--port", type=int, default=8765)
     evaluate_timeline = subparsers.add_parser(
         "evaluate-timeline",
         help="Measure temporal overlay quality against an annotated benchmark",
@@ -521,6 +529,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+
+        if args.command == "serve-viewer":
+            serve_viewer(args.directory, host=args.host, port=args.port)
             return 0
 
         if args.command == "refine-region-motion":

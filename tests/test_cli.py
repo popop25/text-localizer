@@ -24,6 +24,7 @@ def test_required_commands_are_registered() -> None:
         "layout-regions": ["layout-regions", "tracks.json"],
         "retranslate-tracks": ["retranslate-tracks", "tracks.json"],
         "render-tracks": ["render-tracks", "placeholder"],
+        "serve-viewer": ["serve-viewer", "output"],
         "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
         "evaluate-replacement": [
             "evaluate-replacement",

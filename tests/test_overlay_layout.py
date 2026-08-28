@@ -137,6 +137,8 @@ def test_layout_regions_preserves_source_size_and_eliminates_clipping(
     assert "applyOverlayLayout(node, layout, bbox)" in viewer
     assert "appendSourceEraser(item)" in viewer
     assert 'node.style.backgroundColor = "transparent"' in viewer
+    assert 'layout.lines.join("\\n")' in viewer
+    assert 'layout.lines.join("\n")' not in viewer
     assert "binary-shrink" in viewer
 
 

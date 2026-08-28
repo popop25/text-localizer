@@ -120,16 +120,23 @@ def test_layout_regions_preserves_source_size_and_eliminates_clipping(
 
     validate_track_manifest(result)
     layout = result["region_tracks"][0]["overlay_layout"]
+    replacement = result["region_tracks"][0]["overlay_replacement"]
     assert layout["content_fits"] is True
     assert layout["layout_needs_review"] is False
     assert layout["font_scale"] >= 0.95
     assert result["region_layout"]["baseline_source_box_overflow_count"] == 1
     assert result["region_layout"]["clipped_region_count"] == 0
     assert result["region_layout"]["gates_passed"] is True
+    assert replacement["algorithm"] == "padded-source-box-v1"
+    assert replacement["composite_order"] == ["erase-source", "draw-translation"]
+    assert replacement["erase_padding_top_ratio"] > 0
+    assert result["region_replacement"]["replacement_region_count"] == 1
     assert (output_dir / "layout-quality.json").is_file()
     viewer = (output_dir / "viewer.html").read_text(encoding="utf-8")
     assert "adaptive-fit-v1" in viewer
     assert "applyOverlayLayout(node, layout, bbox)" in viewer
+    assert "appendSourceEraser(item)" in viewer
+    assert 'node.style.backgroundColor = "transparent"' in viewer
     assert "binary-shrink" in viewer
 
 

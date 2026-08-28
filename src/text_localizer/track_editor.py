@@ -109,6 +109,8 @@ def _validate_region_tracks(manifest: dict[str, Any], duration: float) -> int:
             _validate_overlay_style(raw_track.get("overlay_style"), track_id)
         if "overlay_layout" in raw_track:
             _validate_overlay_layout(raw_track.get("overlay_layout"), track_id, region)
+        if "overlay_replacement" in raw_track:
+            _validate_overlay_replacement(raw_track.get("overlay_replacement"), track_id)
 
         keyframes = raw_track.get("keyframes")
         if not isinstance(keyframes, list) or not keyframes:
@@ -609,6 +611,26 @@ def _validate_overlay_layout(raw: Any, track_id: str, region: dict[str, Any]) ->
     for field in ("content_fits", "layout_needs_review"):
         if not isinstance(raw.get(field), bool):
             raise ValueError(f"Region track {track_id} overlay_layout {field} must be boolean.")
+
+
+def _validate_overlay_replacement(raw: Any, track_id: str) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(f"Region track {track_id} overlay_replacement must be a mapping.")
+    if raw.get("schema_version") != 1 or raw.get("algorithm") != "padded-source-box-v1":
+        raise ValueError(f"Region track {track_id} overlay_replacement has an unsupported schema.")
+    if raw.get("composite_order") != ["erase-source", "draw-translation"]:
+        raise ValueError(f"Region track {track_id} overlay_replacement order is invalid.")
+    for field in (
+        "erase_padding_left_ratio",
+        "erase_padding_right_ratio",
+        "erase_padding_top_ratio",
+        "erase_padding_bottom_ratio",
+    ):
+        value = _number(raw.get(field), f"Region track {track_id} overlay_replacement {field}")
+        if value < 0.0 or value > 0.1:
+            raise ValueError(
+                f"Region track {track_id} overlay_replacement {field} is out of range."
+            )
 
 
 def _validate_bbox(raw: Any, label: str) -> None:

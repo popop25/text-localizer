@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "name": "0.mp4 visual replacement fidelity",
+  "video": {
+    "duration_seconds": 175.275102,
+    "fps": 29.97002997002997,
+    "width": 1920,
+    "height": 1080
+  },
+  "ground_truth": {
+    "revision": 1,
+    "source": "Human-audited source pixels from the original 0.mp4 frame at 76.000 seconds",
+    "source_frame": "data/work/m38-diagnostics/source-076000.png",
+    "purpose": "Regression for the user-reported source-text double rendering during slow scroll"
+  },
+  "gates": {
+    "minimum_frame_pass_rate": 1.0,
+    "minimum_region_recall": 1.0,
+    "minimum_bbox_iou": 0.45,
+    "minimum_source_coverage_ratio": 0.98,
+    "maximum_active_region_count_error": 0,
+    "maximum_overlay_collisions": 0
+  },
+  "frames": [
+    {
+      "id": "slow-scroll-076000",
+      "label": "Slow scrolling lecture content at 1:16",
+      "timestamp_seconds": 76.0,
+      "expected_active_region_count": 21,
+      "regions": [
+        {
+          "id": "manager-name",
+          "label": "Instructor manager name",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["김재혁매니저"]
+          },
+          "source_bbox": {
+            "x": 0.27708333333333335,
+            "y": 0.2796296296296296,
+            "width": 0.04479166666666667,
+            "height": 0.013888888888888888
+          }
+        },
+        {
+          "id": "intro-body-first",
+          "label": "First introduction paragraph",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["이 강의에서는 AzureOpenAI"]
+          },
+          "source_bbox": {
+            "x": 0.26510416666666664,
+            "y": 0.45925925925925926,
+            "width": 0.5005208333333333,
+            "height": 0.016666666666666666
+          }
+        },
+        {
+          "id": "intro-body-second",
+          "label": "Second introduction paragraph",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["Hands-on 실습을통해"]
+          },
+          "source_bbox": {
+            "x": 0.26510416666666664,
+            "y": 0.48703703703703705,
+            "width": 0.5421875,
+            "height": 0.016666666666666666
+          }
+        },
+        {
+          "id": "learning-objective-first",
+          "label": "First learning objective",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["Azure OpenAI 와 OpenAI API"]
+          },
+          "source_bbox": {
+            "x": 0.27708333333333335,
+            "y": 0.5777777777777777,
+            "width": 0.19739583333333333,
+            "height": 0.019444444444444445
+          }
+        },
+        {
+          "id": "curriculum-heading",
+          "label": "Course curriculum heading",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["커리큘럼(Course Curriculum)"]
+          },
+          "source_bbox": {
+            "x": 0.26510416666666664,
+            "y": 0.7268518518518519,
+            "width": 0.1609375,
+            "height": 0.020370370370370372
+          }
+        },
+        {
+          "id": "curriculum-first-item",
+          "label": "First course curriculum item",
+          "match": {
+            "field": "source_text",
+            "mode": "contains",
+            "patterns": ["Azure OpenAI 의 이해"]
+          },
+          "source_bbox": {
+            "x": 0.27708333333333335,
+            "y": 0.7583333333333333,
+            "width": 0.0828125,
+            "height": 0.018518518518518517
+          }
+        }
+      ]
+    }
+  ]
+}

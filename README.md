@@ -1,6 +1,6 @@
 # text-localizer
 
-`text-localizer` is a Windows-native, CPU-only pipeline for detecting Korean text in
+`text-localizer` is a pipeline for detecting Korean text in
 lecture or screen-recording video frames, producing editable Japanese overlay data, and
 rendering an approved timeline into a separate localized MP4. The original MP4 is never
 modified.

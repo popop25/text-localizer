@@ -93,6 +93,13 @@ evaluator, repeatable local-provider benchmarking, and schema-v2 retranslation t
 keyframes and adaptive styles. The default CPU provider is now the 270M Gemma3 translator; the
 previous M2M100 provider remains selectable. See docs/m3.6-translation-quality.md.
 
+M3.7 adds adaptive Japanese text layout with source-size preservation, bounded horizontal
+expansion, wrapping, and explicit clipping gates. See docs/m3.7-adaptive-text-layout.md.
+
+M3.8 adds a visual-replacement benchmark for the reported 1:16 slow-scroll failure, conservative
+scene-anchor motion interpolation, and two-phase source erasure followed by transparent translated
+text rendering. See docs/m3.8-replacement-fidelity.md.
+
 The source image and original MP4 are never modified. Intermediate data, review artifacts, and
 the final rendered video stay separate from the source.
 
@@ -151,11 +158,14 @@ text-localizer index-video data\input\sample.mp4 --sample-interval 1
 text-localizer index-visual-events data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer localize-video data\input\sample.mp4 --profile config\profiles\browser-lecture.yaml
 text-localizer track-regions data\output\sample-timeline\tracks.json data\work\sample-visual-events\visual-events.json --profile config\profiles\browser-lecture.yaml
+text-localizer refine-region-motion data\output\sample-region-tracks\tracks.json --output data\output\sample-motion
 text-localizer style-regions data\output\sample-region-tracks\tracks.json --output data\output\sample-styled
 text-localizer retranslate-tracks data\output\sample-styled\tracks.json --output data\output\sample-retranslated
 text-localizer layout-regions data\output\sample-retranslated\tracks.json --output data\output\sample-laid-out --require-pass
 text-localizer render-tracks data\output\sample-timeline\tracks.edited.json
+text-localizer serve-viewer data\output\sample-timeline
 text-localizer evaluate-timeline data\output\0-m23-auto\tracks.json config\benchmarks\0-temporal-quality.json
+text-localizer evaluate-replacement data\output\sample-laid-out\tracks.json config\benchmarks\0-replacement-quality.json --require-pass
 text-localizer evaluate-translations data\output\sample-retranslated\tracks.json config\benchmarks\0-translation-quality.json
 text-localizer benchmark-translator config\benchmarks\0-translation-quality.json --translation-provider gemma3-270m
 text-localizer render-video data\output\sample-timeline\tracks.edited.json --output data\output\sample-final\sample.ja.mp4
@@ -225,6 +235,17 @@ loading PaddleOCR again. Prior model translations are reused only when the provi
 normalized source match and current quality checks still pass.
 After editing and exporting JSON in the browser, use `render-tracks` to validate the complete
 timeline and regenerate both HTML artifacts.
+
+Open generated video viewers through the loopback preview server so browsers can request MP4
+byte ranges without mixing an HTTP page with a `file://` media URL:
+
+```powershell
+text-localizer serve-viewer data\output\sample-timeline
+```
+
+Then open `http://127.0.0.1:8765/viewer.html`. The server binds only to a loopback IP address.
+When the source MP4 is inside the viewer output directory, generated HTML uses a relative media
+URL and remains portable with the directory.
 
 Once every review flag is resolved, burn the approved overlays into a separate MP4:
 

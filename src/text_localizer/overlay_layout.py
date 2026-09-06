@@ -79,6 +79,7 @@ def layout_region_tracks(
             or bool(region.get("needs_review"))
         ):
             track.pop("overlay_layout", None)
+            track.pop("overlay_replacement", None)
             continue
         layout, record = _resolve_layout(
             translated_text.strip(),
@@ -90,6 +91,28 @@ def layout_region_tracks(
             options=resolved_options,
         )
         track["overlay_layout"] = layout
+        replacement = _resolve_replacement_geometry(
+            layout,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        track["overlay_replacement"] = replacement
+        record.update(
+            {
+                "erase_padding_left_px": round(
+                    float(replacement["erase_padding_left_ratio"]) * frame_width
+                ),
+                "erase_padding_right_px": round(
+                    float(replacement["erase_padding_right_ratio"]) * frame_width
+                ),
+                "erase_padding_top_px": round(
+                    float(replacement["erase_padding_top_ratio"]) * frame_height
+                ),
+                "erase_padding_bottom_px": round(
+                    float(replacement["erase_padding_bottom_ratio"]) * frame_height
+                ),
+            }
+        )
         records.append({"region_track_id": track["region_track_id"], **record})
 
     strategy_counts = Counter(str(record["fit_strategy"]) for record in records)
@@ -140,6 +163,12 @@ def layout_region_tracks(
         "current_run_latency_ms": current_run_latency_ms,
     }
     result["region_layout"] = summary
+    result["region_replacement"] = {
+        "schema_version": 1,
+        "algorithm": "padded-source-box-v1",
+        "composite_order": ["erase-source", "draw-translation"],
+        "replacement_region_count": approved_count,
+    }
     metrics = cast(dict[str, Any], result["metrics"])
     metrics.update(
         {
@@ -166,6 +195,27 @@ def layout_region_tracks(
     video_path = _resolve_video_path(result, manifest_path)
     write_video_viewer(output_dir / "viewer.html", video_path, result)
     return result
+
+
+def _resolve_replacement_geometry(
+    layout: dict[str, Any],
+    *,
+    frame_width: int,
+    frame_height: int,
+) -> dict[str, Any]:
+    source_font_size = max(1, round(float(layout["source_font_size_ratio"]) * frame_height))
+    horizontal_padding = max(2, math.ceil(source_font_size * 0.18))
+    top_padding = max(2, math.ceil(source_font_size * 0.35))
+    bottom_padding = max(2, math.ceil(source_font_size * 0.35))
+    return {
+        "schema_version": 1,
+        "algorithm": "padded-source-box-v1",
+        "composite_order": ["erase-source", "draw-translation"],
+        "erase_padding_left_ratio": horizontal_padding / frame_width,
+        "erase_padding_right_ratio": horizontal_padding / frame_width,
+        "erase_padding_top_ratio": top_padding / frame_height,
+        "erase_padding_bottom_ratio": bottom_padding / frame_height,
+    }
 
 
 def _resolve_layout(

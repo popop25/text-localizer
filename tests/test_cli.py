@@ -19,11 +19,18 @@ def test_required_commands_are_registered() -> None:
         "localize-video": ["localize-video", "placeholder"],
         "index-visual-events": ["index-visual-events", "placeholder"],
         "track-regions": ["track-regions", "tracks.json", "visual-events.json"],
+        "refine-region-motion": ["refine-region-motion", "tracks.json"],
         "style-regions": ["style-regions", "tracks.json"],
         "layout-regions": ["layout-regions", "tracks.json"],
         "retranslate-tracks": ["retranslate-tracks", "tracks.json"],
         "render-tracks": ["render-tracks", "placeholder"],
+        "serve-viewer": ["serve-viewer", "output"],
         "evaluate-timeline": ["evaluate-timeline", "tracks.json", "benchmark.json"],
+        "evaluate-replacement": [
+            "evaluate-replacement",
+            "tracks.json",
+            "benchmark.json",
+        ],
         "evaluate-translations": [
             "evaluate-translations",
             "tracks.json",
@@ -175,6 +182,27 @@ def test_evaluate_timeline_command_can_require_passing_gates(
     status = cli.main(
         [
             "evaluate-timeline",
+            "tracks.json",
+            "benchmark.json",
+            "--require-pass",
+        ]
+    )
+
+    assert status == 1
+
+
+def test_evaluate_replacement_command_can_require_passing_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "evaluate_replacement_quality_files",
+        lambda *_args, **_kwargs: {"summary": {"gates_passed": False}},
+    )
+
+    status = cli.main(
+        [
+            "evaluate-replacement",
             "tracks.json",
             "benchmark.json",
             "--require-pass",

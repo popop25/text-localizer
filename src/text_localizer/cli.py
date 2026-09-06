@@ -30,7 +30,9 @@ from text_localizer.providers.translation import (
     TRANSLATION_PROVIDER_CHOICES,
     create_translation_provider,
 )
+from text_localizer.region_motion import RegionMotionOptions, refine_region_motion
 from text_localizer.region_tracks import RegionTrackingOptions, localize_region_tracks
+from text_localizer.replacement_quality import evaluate_replacement_quality_files
 from text_localizer.retranslate_tracks import retranslate_region_tracks
 from text_localizer.scenes import index_frame_directory
 from text_localizer.setup_models import setup_ocr_models, setup_translation_model
@@ -46,6 +48,7 @@ from text_localizer.translation_quality import (
 from text_localizer.video import extract_representative_frames, inspect_video
 from text_localizer.video_renderer import VideoRenderOptions, render_localized_video
 from text_localizer.video_viewer import write_video_viewer
+from text_localizer.viewer_server import serve_viewer
 from text_localizer.visual_events import index_video_visual_events
 
 
@@ -234,6 +237,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tracking-only OCR exclusion (repeatable)",
     )
 
+    refine_motion = subparsers.add_parser(
+        "refine-region-motion",
+        help="Interpolate slow scene-anchor drift between sparse region keyframes",
+    )
+    refine_motion.add_argument("path", type=Path, help="Schema-v2 tracks JSON")
+    refine_motion.add_argument("--output", type=Path)
+    refine_motion.add_argument("--minimum-segment-seconds", type=float, default=1.0)
+    refine_motion.add_argument(
+        "--minimum-vertical-displacement-ratio", type=float, default=0.005
+    )
+    refine_motion.add_argument(
+        "--maximum-vertical-speed-ratio-per-second", type=float, default=0.01
+    )
+    refine_motion.add_argument(
+        "--maximum-horizontal-speed-ratio-per-second", type=float, default=0.002
+    )
+    refine_motion.add_argument("--maximum-size-change-ratio", type=float, default=0.4)
+
     style_regions = subparsers.add_parser(
         "style-regions",
         help="Infer source-matched colors and font scale for schema-v2 region tracks",
@@ -287,6 +308,13 @@ def build_parser() -> argparse.ArgumentParser:
     render_tracks.add_argument("path", type=Path)
     render_tracks.add_argument("--output", type=Path)
     render_tracks.add_argument("--video", type=Path)
+    serve_viewer_command = subparsers.add_parser(
+        "serve-viewer",
+        help="Serve a generated viewer and video over loopback HTTP with media seeking",
+    )
+    serve_viewer_command.add_argument("directory", type=Path)
+    serve_viewer_command.add_argument("--host", default="127.0.0.1")
+    serve_viewer_command.add_argument("--port", type=int, default=8765)
     evaluate_timeline = subparsers.add_parser(
         "evaluate-timeline",
         help="Measure temporal overlay quality against an annotated benchmark",
@@ -298,6 +326,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-pass",
         action="store_true",
         help="Return a non-zero status when a quality gate fails",
+    )
+    evaluate_replacement = subparsers.add_parser(
+        "evaluate-replacement",
+        help="Measure in-place source-text replacement fidelity at audited frames",
+    )
+    evaluate_replacement.add_argument("path", type=Path, help="Schema-v2 tracks JSON")
+    evaluate_replacement.add_argument("benchmark", type=Path, help="Replacement benchmark JSON")
+    evaluate_replacement.add_argument("--output", type=Path)
+    evaluate_replacement.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Return a non-zero status when a replacement quality gate fails",
     )
     evaluate_translations = subparsers.add_parser(
         "evaluate-translations",
@@ -491,6 +531,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
 
+        if args.command == "serve-viewer":
+            serve_viewer(args.directory, host=args.host, port=args.port)
+            return 0
+
+        if args.command == "refine-region-motion":
+            output = args.output or args.path.with_name(f"{args.path.stem}-motion")
+            report = refine_region_motion(
+                args.path,
+                output,
+                options=RegionMotionOptions(
+                    minimum_segment_seconds=args.minimum_segment_seconds,
+                    minimum_vertical_displacement_ratio=(
+                        args.minimum_vertical_displacement_ratio
+                    ),
+                    maximum_vertical_speed_ratio_per_second=(
+                        args.maximum_vertical_speed_ratio_per_second
+                    ),
+                    maximum_horizontal_speed_ratio_per_second=(
+                        args.maximum_horizontal_speed_ratio_per_second
+                    ),
+                    maximum_size_change_ratio=args.maximum_size_change_ratio,
+                ),
+            )
+            print(json.dumps(report["region_motion"], ensure_ascii=False, indent=2))
+            return 0
+
         if args.command == "render-video":
             output = args.output or args.path.with_name("localized.mp4")
             report = render_localized_video(
@@ -508,6 +574,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "evaluate-timeline":
             report = evaluate_temporal_quality_files(
+                args.path,
+                args.benchmark,
+                output_path=args.output,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            if args.require_pass and not report["summary"]["gates_passed"]:
+                return 1
+            return 0
+
+        if args.command == "evaluate-replacement":
+            report = evaluate_replacement_quality_files(
                 args.path,
                 args.benchmark,
                 output_path=args.output,

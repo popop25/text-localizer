@@ -11,7 +11,13 @@ def write_video_viewer(
     manifest: dict[str, Any],
 ) -> None:
     manifest_json = json.dumps(manifest, ensure_ascii=False).replace("<", "\\u003c")
-    video_json = json.dumps(video_path.resolve().as_uri()).replace("<", "\\u003c")
+    output_dir = output_path.resolve().parent
+    resolved_video = video_path.resolve()
+    try:
+        video_source = resolved_video.relative_to(output_dir).as_posix()
+    except ValueError:
+        video_source = resolved_video.as_uri()
+    video_json = json.dumps(video_source).replace("<", "\\u003c")
     html = f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -29,6 +35,7 @@ def write_video_viewer(
     .stage {{ position: relative; width: 100%; background: black; overflow: hidden; }}
     video {{ display: block; width: 100%; height: auto; }}
     .overlay-layer {{ position: absolute; inset: 0; pointer-events: none; }}
+    .overlay-erase {{ position: absolute; box-sizing: border-box; }}
     .overlay {{ position: absolute; box-sizing: border-box; display: flex;
                 align-items: center; overflow: hidden; padding: 2px 4px; white-space: pre;
                 background: rgba(11, 13, 17, .88); color: white; line-height: 1.15;
@@ -106,7 +113,8 @@ def write_video_viewer(
           .map(track => ({{ id: track.region_track_id, region: track.region,
                            bbox: regionTrackBox(track, time),
                            style: track.overlay_style || null,
-                           layout: track.overlay_layout || null }}));
+                           layout: track.overlay_layout || null,
+                           replacement: track.overlay_replacement || null }}));
       }}
       const track = findTrack(time);
       return track ? track.regions.map((region, index) => ({{
@@ -159,6 +167,34 @@ def write_video_viewer(
       return {{ x, y, width, height }};
     }}
 
+    function replacementBox(bbox, replacement) {{
+      const left = replacement.erase_padding_left_ratio;
+      const right = replacement.erase_padding_right_ratio;
+      const top = replacement.erase_padding_top_ratio;
+      const bottom = replacement.erase_padding_bottom_ratio;
+      const x = Math.max(0, bbox.x - left);
+      const y = Math.max(0, bbox.y - top);
+      const rightEdge = Math.min(1, bbox.x + bbox.width + right);
+      const bottomEdge = Math.min(1, bbox.y + bbox.height + bottom);
+      return {{ x, y, width: rightEdge - x, height: bottomEdge - y }};
+    }}
+
+    function appendSourceEraser(item) {{
+      if (!item.replacement) return;
+      const box = replacementBox(item.bbox, item.replacement);
+      const eraser = document.createElement("div");
+      eraser.className = "overlay-erase";
+      eraser.style.left = (box.x * 100) + "%";
+      eraser.style.top = (box.y * 100) + "%";
+      eraser.style.width = (box.width * 100) + "%";
+      eraser.style.height = (box.height * 100) + "%";
+      eraser.style.backgroundColor = item.style
+        ? hexToRgba(item.style.background_color, 1)
+        : "rgb(11, 13, 17)";
+      eraser.dataset.replacementAlgorithm = item.replacement.algorithm;
+      layer.appendChild(eraser);
+    }}
+
     function overlayFits(node) {{
       return node.scrollWidth <= node.clientWidth + 1 &&
         node.scrollHeight <= node.clientHeight + 1;
@@ -200,18 +236,21 @@ def write_video_viewer(
         return;
       }}
       let layoutReviewCount = 0;
-      for (const item of activeRegions(time)) {{
+      const renderItems = activeRegions(time).filter(item =>
+        item.region.action === "translate" &&
+        item.region.translated_text && !item.region.needs_review);
+      for (const item of renderItems) appendSourceEraser(item);
+      for (const item of renderItems) {{
         const region = item.region;
         const bbox = item.bbox;
-        if (region.action !== "translate" ||
-            !region.translated_text || region.needs_review) continue;
         const node = document.createElement("div");
         node.className = "overlay";
         const normalizedText = region.translated_text.trim();
         const layout = item.layout && item.layout.text === normalizedText
           ? item.layout : null;
-        node.textContent = layout ? layout.lines.join("\n") : normalizedText;
+        node.textContent = layout ? layout.lines.join("\\n") : normalizedText;
         applyOverlayStyle(node, item.style, bbox);
+        if (item.replacement) node.style.backgroundColor = "transparent";
         const resolvedBox = layout ? applyOverlayLayout(node, layout, bbox) : bbox;
         node.style.left = (resolvedBox.x * 100) + "%";
         node.style.top = (resolvedBox.y * 100) + "%";
